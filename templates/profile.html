@@ -226,7 +226,7 @@
             }
         }
 
-    </style>
+    @media(max-width:760px){.wrap{max-width:100%;padding-left:12px!important;padding-right:12px!important}.nav,.top{flex-wrap:wrap!important;padding-left:12px!important;padding-right:12px!important}.actions,.navlinks{width:100%;justify-content:space-between}.grid,.profile-layout,.body{grid-template-columns:1fr!important;flex-direction:column!important}.card,.section{width:100%!important}.search{flex-wrap:wrap}.search input{min-width:0}.conversation{min-width:0}.chat{max-width:100%!important}.message{max-width:88%!important}table{font-size:13px}}</style>
 
 </head>
 
@@ -428,6 +428,26 @@
 
         </div>
 
+
+        <!-- LOGIN PASSWORD -->
+        <div class="gallery-card" style="margin-bottom:20px;">
+            <h3>Reset User Login Password</h3>
+            <p style="color:#666; font-size:13px;">This changes the password used at <strong>/user-login</strong>.</p>
+            <form action="{{ url_for('view_profile', user_id=profile['id']) }}" method="POST">
+                <input type="hidden" name="form_type" value="password_reset">
+                <div class="form-row">
+                    <div>
+                        <label for="new_password">New Password</label>
+                        <input type="password" id="new_password" name="new_password" minlength="6" required>
+                    </div>
+                    <div>
+                        <label for="confirm_password">Confirm Password</label>
+                        <input type="password" id="confirm_password" name="confirm_password" minlength="6" required>
+                    </div>
+                </div>
+                <button type="submit" class="save-btn">Set Login Password</button>
+            </form>
+        </div>
 
         <!-- GALLERY -->
 
