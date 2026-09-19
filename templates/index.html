@@ -44,7 +44,30 @@
 
     <div class="top-navbar">
         <h2>🔒 Secure Admin Directory Platform</h2>
-        <a href="/logout" class="logout-btn">Log Out Session</a>
+        <div style="display:flex; gap:10px; align-items:center;">
+
+    <a
+        href="{{ url_for('activity_log') }}"
+        style="
+            color:#0066cc;
+            font-weight:bold;
+            text-decoration:none;
+            border:1px solid #0066cc;
+            padding:6px 15px;
+            border-radius:5px;
+        "
+    >
+        Activity Log
+    </a>
+
+    <a
+        href="/logout"
+        class="logout-btn"
+    >
+        Log Out Session
+    </a>
+
+</div>
     </div>
 
     <div class="dashboard-layout">
