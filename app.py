@@ -6,6 +6,7 @@ import secrets
 from dotenv import load_dotenv
 load_dotenv()
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from flask import (
     Flask,
@@ -58,6 +59,8 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("COOKIE_SECURE", "0") == "1"
 app.config["SESSION_COOKIE_NAME"] = "university_session"
 app.config["SESSION_COOKIE_PATH"] = "/"
+app.config["SESSION_COOKIE_REFRESH_EACH_REQUEST"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
 REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
 
 DB_FILE = "database.db"
@@ -516,9 +519,41 @@ def get_site_name():
     return row["value"] if row else os.environ.get("SITE_NAME", "University Connect")
 
 
+def safe_internal_url(candidate, fallback):
+    """Return only a same-site relative URL; never redirect to an external host."""
+    if not candidate:
+        return fallback
+    try:
+        parsed = urlsplit(candidate)
+        if parsed.scheme or parsed.netloc:
+            return fallback
+        path = parsed.path or "/"
+        if not path.startswith("/") or path.startswith("//"):
+            return fallback
+        if path == request.path and (parsed.query or "") == request.query_string.decode("utf-8", "ignore"):
+            return fallback
+        return (
+            path
+            + (("?" + parsed.query) if parsed.query else "")
+            + (("#" + parsed.fragment) if parsed.fragment else "")
+        )
+    except Exception:
+        return fallback
+
+
 @app.context_processor
-def inject_site_settings():
-    return {"site_name": get_site_name()}
+def inject_navigation_context():
+    if session.get("user_logged_in"):
+        fallback = url_for("user_home")
+    elif session.get("logged_in"):
+        fallback = url_for("home")
+    else:
+        fallback = url_for("user_login")
+    return {
+        "site_name": get_site_name(),
+        "return_url": safe_internal_url(request.referrer, fallback),
+    }
+
 
 def require_csrf():
     token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
@@ -650,8 +685,12 @@ def login():
             username == ADMIN_USER
             and check_password_hash(ADMIN_PASSWORD_HASH, password)
         ):
+            # Keep an existing student session intact. This allows admin and
+            # student areas to stay open in separate tabs.
             session["logged_in"] = True
             session["admin_username"] = username
+            session.permanent = True
+            session.modified = True
 
             return redirect(url_for("home"))
 
@@ -666,9 +705,9 @@ def login():
 
 @app.route("/logout")
 def logout():
-
-    session.clear()
-
+    session.pop("logged_in", None)
+    session.pop("admin_username", None)
+    session.modified = True
     return redirect(url_for("login"))
 
 
@@ -797,9 +836,12 @@ def user_login():
         ).fetchone()
         conn.close()
         if user and user["password_hash"] and check_password_hash(user["password_hash"], password):
-            session.clear()
+            # Preserve an admin session if the same browser also has the admin
+            # area open. The two authentication states use separate keys.
             session["user_logged_in"] = True
             session["user_id"] = user["id"]
+            session.permanent = True
+            session.modified = True
             return redirect(url_for("user_home"))
         error = "Invalid username, Gmail, phone number or password."
     return render_template("user_login.html", error=error)
@@ -807,7 +849,9 @@ def user_login():
 
 @app.route("/user-logout")
 def user_logout():
-    session.clear()
+    session.pop("user_logged_in", None)
+    session.pop("user_id", None)
+    session.modified = True
     return redirect(url_for("user_login"))
 
 
@@ -828,7 +872,9 @@ def user_home():
 
     if not current_user:
         conn.close()
-        session.clear()
+        session.pop("user_logged_in", None)
+        session.pop("user_id", None)
+        session.modified = True
         return redirect(url_for("user_login"))
 
     # People section: searchable so users do not need a separate page.
@@ -1066,7 +1112,9 @@ def my_profile():
     conn.close()
 
     if not profile:
-        session.clear()
+        session.pop("user_logged_in", None)
+        session.pop("user_id", None)
+        session.modified = True
         return redirect(url_for("user_login"))
 
     return render_template("detailed_profile.html", profile=profile, gallery=gallery, is_own=True)
@@ -1087,7 +1135,9 @@ def profile_settings():
 
     if not profile:
         conn.close()
-        session.clear()
+        session.pop("user_logged_in", None)
+        session.pop("user_id", None)
+        session.modified = True
         return redirect(url_for("user_login"))
 
     if request.method == "POST":
