@@ -99,3 +99,25 @@ This project is not “unhackable”. Production security also depends on TLS, h
 - The admin dashboard is at `/admin` and is protected by the admin session.
 - The public user interface does not display an admin-login link. Administrators must navigate directly to `/login`.
 - `/login` is the administrator authentication page; successful authentication opens `/admin`.
+
+## Messaging and campus services update
+
+### Messaging
+- Chat sending now includes CSRF correctly.
+- Chat supports AJAX sending without a page reload.
+- Open chats poll `/api/messages/<user_id>` every 2 seconds for new messages.
+- New messages are appended live and the conversation auto-scrolls.
+- Incoming messages are marked read while the conversation is open.
+
+### Campus services
+The earlier database tables were only the foundation; they did not constitute finished user-facing services. This build adds working MVP screens/routes for:
+- Announcements
+- Clubs with join/leave
+- Events with register/unregister
+- Notifications with mark-as-read and JSON endpoint
+- Admin campus management at `/admin/campus`
+
+### Still foundation-only
+- Subscription/billing is not a payment system yet.
+- Multi-university tables/roles exist as a foundation, but full tenant isolation and role-management UI are not complete.
+- Real-time messaging uses lightweight polling rather than WebSockets, so it works with ordinary WSGI hosting without requiring a separate socket service.

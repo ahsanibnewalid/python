@@ -1211,6 +1211,8 @@ def chat(user_id):
 @app.route("/messages/send", methods=["POST"])
 def send_message():
     if not user_required():
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "login_required"}), 401
         return redirect(url_for("user_login"))
 
     require_csrf()
@@ -1219,10 +1221,14 @@ def send_message():
     message_text = request.form.get("message", "").strip()
 
     if not receiver_id or not message_text:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "Please enter a message."}), 400
         flash("Please enter a message.", "error")
         return redirect(url_for("messages"))
 
     if receiver_id == sender_id:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "You cannot message yourself."}), 400
         flash("You cannot message yourself.", "error")
         return redirect(url_for("messages"))
 
@@ -1234,26 +1240,181 @@ def send_message():
 
     if not recipient:
         conn.close()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "Recipient not found."}), 404
         flash("Recipient not found.", "error")
         return redirect(url_for("messages"))
 
-    conn.execute(
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor = conn.execute(
         """
         INSERT INTO messages
         (sender_id, receiver_id, message, created_at, is_read)
         VALUES (?, ?, ?, ?, 0)
         """,
-        (
-            sender_id,
-            receiver_id,
-            message_text,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+        (sender_id, receiver_id, message_text, created_at)
     )
+    message_id = cursor.lastrowid
     conn.commit()
     conn.close()
 
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({
+            "ok": True,
+            "message": {
+                "id": message_id,
+                "sender_id": sender_id,
+                "receiver_id": receiver_id,
+                "message": message_text,
+                "created_at": created_at,
+            }
+        })
+
     return redirect(url_for("chat", user_id=receiver_id))
+
+
+@app.route("/api/messages/<int:user_id>")
+def api_messages(user_id):
+    """Return messages newer than since_id for the open conversation.
+
+    This is intentionally lightweight polling rather than WebSockets so the
+    application keeps working behind ordinary WSGI/HTTPS deployments.
+    """
+    if not user_required():
+        return jsonify({"error": "login_required"}), 401
+
+    current_user_id = session["user_id"]
+    if user_id == current_user_id:
+        return jsonify({"error": "invalid_recipient"}), 400
+
+    try:
+        since_id = max(0, int(request.args.get("since_id", 0)))
+    except (TypeError, ValueError):
+        since_id = 0
+
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "user_not_found"}), 404
+
+    # Opening/polling a chat means messages from the other participant are read.
+    conn.execute(
+        "UPDATE messages SET is_read=1 WHERE sender_id=? AND receiver_id=?",
+        (user_id, current_user_id)
+    )
+    rows = conn.execute(
+        """
+        SELECT id, sender_id, receiver_id, message, created_at
+        FROM messages
+        WHERE id > ?
+          AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?))
+        ORDER BY id ASC
+        """,
+        (since_id, current_user_id, user_id, user_id, current_user_id)
+    ).fetchall()
+    conn.commit()
+    conn.close()
+    return jsonify({"messages": [dict(row) for row in rows]})
+
+
+# ---------------------------------------------------------
+# Campus services: announcements, clubs, events and notifications
+# ---------------------------------------------------------
+
+@app.route("/campus")
+def campus_services():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    conn = get_db_connection()
+    announcements = conn.execute("SELECT * FROM announcements ORDER BY id DESC LIMIT 20").fetchall()
+    clubs = conn.execute("SELECT * FROM clubs ORDER BY name COLLATE NOCASE").fetchall()
+    events = conn.execute("SELECT * FROM events ORDER BY event_date ASC, id DESC").fetchall()
+    user_id = session["user_id"]
+    joined = {r["club_id"] for r in conn.execute("SELECT club_id FROM club_members WHERE user_id=?", (user_id,)).fetchall()}
+    registered = {r["event_id"] for r in conn.execute("SELECT event_id FROM event_registrations WHERE user_id=?", (user_id,)).fetchall()}
+    notifications = conn.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20", (user_id,)).fetchall()
+    conn.close()
+    return render_template("campus.html", announcements=announcements, clubs=clubs, events=events, joined=joined, registered=registered, notifications=notifications, csrf=csrf_token())
+
+
+@app.route("/clubs/<int:club_id>/join", methods=["POST"])
+def join_club(club_id):
+    if not user_required(): return jsonify({"error":"login_required"}), 401
+    require_csrf()
+    conn=get_db_connection(); uid=session["user_id"]
+    if not conn.execute("SELECT id FROM clubs WHERE id=?", (club_id,)).fetchone():
+        conn.close(); return jsonify({"error":"club_not_found"}), 404
+    exists=conn.execute("SELECT 1 FROM club_members WHERE club_id=? AND user_id=?", (club_id,uid)).fetchone()
+    if exists:
+        conn.execute("DELETE FROM club_members WHERE club_id=? AND user_id=?", (club_id,uid)); joined=False
+    else:
+        conn.execute("INSERT INTO club_members(club_id,user_id,joined_at) VALUES(?,?,?)", (club_id,uid,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); joined=True
+    conn.commit(); conn.close()
+    return jsonify({"joined":joined})
+
+
+@app.route("/events/<int:event_id>/register", methods=["POST"])
+def register_event(event_id):
+    if not user_required(): return jsonify({"error":"login_required"}), 401
+    require_csrf()
+    conn=get_db_connection(); uid=session["user_id"]
+    if not conn.execute("SELECT id FROM events WHERE id=?", (event_id,)).fetchone():
+        conn.close(); return jsonify({"error":"event_not_found"}), 404
+    exists=conn.execute("SELECT 1 FROM event_registrations WHERE event_id=? AND user_id=?", (event_id,uid)).fetchone()
+    if exists:
+        conn.execute("DELETE FROM event_registrations WHERE event_id=? AND user_id=?", (event_id,uid)); registered=False
+    else:
+        conn.execute("INSERT INTO event_registrations(event_id,user_id,registered_at) VALUES(?,?,?)", (event_id,uid,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); registered=True
+    conn.commit(); conn.close()
+    return jsonify({"registered":registered})
+
+
+@app.route("/notifications/<int:notification_id>/read", methods=["POST"])
+def mark_notification_read(notification_id):
+    if not user_required(): return jsonify({"error":"login_required"}), 401
+    require_csrf()
+    conn=get_db_connection()
+    conn.execute("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?", (notification_id, session["user_id"]))
+    conn.commit(); conn.close()
+    return jsonify({"ok":True})
+
+
+@app.route("/api/notifications")
+def api_notifications():
+    if not user_required(): return jsonify({"error":"login_required"}), 401
+    conn=get_db_connection(); uid=session["user_id"]
+    rows=conn.execute("SELECT id,title,body,is_read,created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (uid,)).fetchall()
+    unread=conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0", (uid,)).fetchone()[0]
+    conn.close()
+    return jsonify({"notifications":[dict(r) for r in rows],"unread_count":unread})
+
+
+@app.route("/admin/campus", methods=["GET", "POST"])
+def admin_campus():
+    if not admin_required(): return redirect(url_for("login"))
+    require_csrf() if request.method == "POST" else None
+    conn=get_db_connection()
+    if request.method == "POST":
+        kind=request.form.get("kind")
+        title=request.form.get("title", "").strip()
+        body=request.form.get("body", "").strip()
+        if kind == "announcement" and title and body:
+            conn.execute("INSERT INTO announcements(title,body,created_at) VALUES(?,?,?)", (title,body,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            flash("Announcement published.", "success")
+        elif kind == "club" and title:
+            conn.execute("INSERT INTO clubs(name,description,created_at) VALUES(?,?,?)", (title,body,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            flash("Club created.", "success")
+        elif kind == "event" and title and body and request.form.get("event_date"):
+            conn.execute("INSERT INTO events(title,description,event_date,location,created_at) VALUES(?,?,?,?,?)", (title,body,request.form.get("event_date"),request.form.get("location", "").strip(),datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            flash("Event created.", "success")
+        else:
+            flash("Please complete the required fields.", "error")
+        conn.commit(); conn.close(); return redirect(url_for("admin_campus"))
+    announcements=conn.execute("SELECT * FROM announcements ORDER BY id DESC").fetchall()
+    clubs=conn.execute("SELECT * FROM clubs ORDER BY id DESC").fetchall()
+    events=conn.execute("SELECT * FROM events ORDER BY event_date ASC").fetchall()
+    conn.close()
+    return render_template("admin_campus.html", announcements=announcements, clubs=clubs, events=events, csrf=csrf_token())
 
 
 # ---------------------------------------------------------
