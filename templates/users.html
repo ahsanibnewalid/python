@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ site_name }} · Users</title>
+<style>
+body{margin:0;background:#f4f6f9;font-family:system-ui,-apple-system,Segoe UI,Arial;color:#172033;padding:24px}.wrap{max-width:1200px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.top a{color:#1456c4;text-decoration:none;font-weight:800}.card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 5px 20px rgba(15,23,42,.06);margin-bottom:18px}.search{display:flex;gap:8px}.search input{flex:1;padding:11px;border:1px solid #d6dce5;border-radius:9px}.btn{border:0;border-radius:9px;padding:10px 14px;background:#1456c4;color:#fff;font-weight:800;cursor:pointer}.btn-danger{background:#b42318}.btn-muted{background:#eef2f7;color:#344054}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid #edf0f4;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#475467;font-size:13px}.avatar{width:42px;height:42px;border-radius:50%;object-fit:cover}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef4ff;color:#1456c4;font-size:11px;font-weight:800}.actions{display:flex;gap:6px;flex-wrap:wrap}.inline{display:inline}.muted{color:#667085;font-size:12px}@media(max-width:800px){body{padding:10px}.top{align-items:flex-start;flex-direction:column}.search{flex-direction:column}.table-wrap{overflow:auto}table{min-width:900px}}
+</style>
+</head>
+<body><main class="wrap">
+<div class="top"><div><h1 style="margin:0">👥 User Management</h1><div class="muted">{{ users|length }} account(s) shown</div></div><div><a href="{{ url_for('home') }}">← Dashboard</a></div></div>
+<div class="card"><form class="search" method="GET"><input name="q" value="{{ query }}" placeholder="Search name, username, Gmail or phone"><button class="btn" type="submit">Search</button>{% if query %}<a class="btn btn-muted" href="{{ url_for('admin_users') }}">Clear</a>{% endif %}</form></div>
+<div class="card table-wrap"><table><thead><tr><th>User</th><th>Username</th><th>Gmail</th><th>Phone</th><th>Study</th><th>Role</th><th>Actions</th></tr></thead><tbody>
+{% for u in users %}<tr><td><div style="display:flex;align-items:center;gap:9px"><img class="avatar" src="{{ url_for('static',filename='uploads/'+u['photo']) }}"><div><b>{{ u['name'] }}</b><div class="muted">ID #{{ u['id'] }}</div></div></div></td><td>@{{ u['username'] or '—' }}</td><td>{{ u['gmail'] }}</td><td>{{ u['phone'] or '—' }}</td><td>{{ u['department'] or '—' }}{% if u['university'] %}<div class="muted">{{ u['university'] }}</div>{% endif %}</td><td><span class="pill">{{ u['role_name'] }}</span></td><td><div class="actions"><a class="btn" href="{{ url_for('view_profile',user_id=u['id']) }}">View / Edit</a><form class="inline" method="POST" action="{{ url_for('admin_delete_user',user_id=u['id']) }}" onsubmit="return confirm('Delete this user and their related content?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger" type="submit">Delete</button></form></div></td></tr>
+{% else %}<tr><td colspan="7" style="text-align:center;padding:35px;color:#667085">No users found.</td></tr>{% endfor %}
+</tbody></table></div>
+</main></body></html>
