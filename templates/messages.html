@@ -18,7 +18,7 @@ select,button{padding:11px;border-radius:8px;border:1px solid #ccc}select{width:
 button{background:#0066cc;color:white;border:0;font-weight:700}
 @media(max-width:760px){.wrap{max-width:100%;padding-left:12px!important;padding-right:12px!important}.nav,.top{flex-wrap:wrap!important;padding-left:12px!important;padding-right:12px!important}.actions,.navlinks{width:100%;justify-content:space-between}.grid,.profile-layout,.body{grid-template-columns:1fr!important;flex-direction:column!important}.card,.section{width:100%!important}.search{flex-wrap:wrap}.search input{min-width:0}.conversation{min-width:0}.chat{max-width:100%!important}.message{max-width:88%!important}table{font-size:13px}}</style>
 </head>
-<body>
+<body>{% include 'return_nav.html' %}
 <div class="nav"><strong>💬 Messages</strong><div><a href="{{ url_for('user_home') }}">Home</a><a href="{{ url_for('user_logout') }}">Log Out</a></div></div>
 <div class="wrap">
 <h2>Conversations</h2>
@@ -50,5 +50,5 @@ const id=document.getElementById('person').value;
 if(id) window.location.href='/messages/'+id;
 });
 </script>
-</body>
+{% include 'mobile_nav.html' %}</body>
 </html>
