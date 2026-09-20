@@ -45,3 +45,31 @@ This package is the practical first-pass implementation of the previously discus
 - Malware scanning/video transcoding: requires infrastructure/services beyond the current Flask process.
 
 These items are intentionally left as explicit next architecture steps rather than pretending that a schema-only change provides full production multi-tenancy or billing.
+
+## V4 Commercial Campus Management
+
+This build adds real application workflows rather than only database foundations:
+
+- University creation and tenant records
+- Department creation
+- Batch creation
+- Group creation with university-wide or department-only visibility
+- Group membership join/leave
+- User assignment to university, department and batch
+- User role assignment (STUDENT, UNIVERSITY_ADMIN, DEPARTMENT_ADMIN, MODERATOR, TEACHER, ALUMNI, SUPER_ADMIN)
+- Announcements scoped to a university or global
+- Clubs and events scoped to a university or global
+- Event registration counts
+- Platform analytics dashboard
+- SQLite database backup download for administrators
+- Branding configuration and custom-domain configuration storage
+- Multiple university administrators through the role table
+- User-facing Groups section
+- Campus content filtered by the user's university
+
+### Commercial limitations still requiring production work
+
+- Payment gateway/billing is not implemented yet.
+- Custom-domain DNS/SSL provisioning is configuration-only; deployment automation is still required.
+- Fine-grained permission enforcement needs to be applied to every university/depart­ment/moderator action before multi-tenant production use.
+- PostgreSQL/object storage/WebSocket infrastructure should replace SQLite/local polling for production scale.

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from sqlite3 import IntegrityError
 import uuid
 import secrets
 from dotenv import load_dotenv
@@ -333,6 +334,133 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+    # -----------------------------------------------------
+    # Commercial product modules: departments, batches, groups,
+    # university admins, branding and reporting.
+    # -----------------------------------------------------
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS departments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            code TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(university_id, name),
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER NOT NULL,
+            department_id INTEGER,
+            name TEXT NOT NULL,
+            start_year INTEGER,
+            end_year INTEGER,
+            created_at TEXT NOT NULL,
+            UNIQUE(university_id, name),
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE,
+            FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER NOT NULL,
+            department_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            privacy TEXT NOT NULL DEFAULT 'university',
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE,
+            FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY(group_id,user_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_admins (
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(group_id,user_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_join_requests (
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(group_id,user_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_post_likes (
+            post_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(post_id,user_id),
+            FOREIGN KEY (post_id) REFERENCES group_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_post_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            comment TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (post_id) REFERENCES group_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS branding_settings (
+            university_id INTEGER PRIMARY KEY,
+            primary_color TEXT DEFAULT '#1456c4',
+            secondary_color TEXT DEFAULT '#0f172a',
+            accent_color TEXT DEFAULT '#22c55e',
+            custom_domain TEXT DEFAULT '',
+            logo TEXT DEFAULT '',
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+
+    for column, definition in {
+        'department_id': 'INTEGER DEFAULT NULL',
+        'batch_id': 'INTEGER DEFAULT NULL'
+    }.items():
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -476,6 +604,31 @@ def log_activity(action, description, target_user_id=None):
 
 def admin_required():
     return session.get("logged_in") is True
+
+
+def notify_user(conn, user_id, title, body):
+    """Create an in-app notification safely inside the caller's transaction."""
+    if not user_id:
+        return
+    conn.execute(
+        "INSERT INTO notifications(user_id,title,body,is_read,created_at) VALUES(?,?,?,?,?)",
+        (user_id, title, body, 0, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+
+
+def notify_group_admins(conn, group_id, title, body, exclude_user_id=None):
+    rows = conn.execute(
+        """SELECT DISTINCT u.id FROM users u
+           JOIN group_admins ga ON ga.user_id=u.id
+           WHERE ga.group_id=?
+           UNION SELECT created_by FROM groups WHERE id=? AND created_by IS NOT NULL""",
+        (group_id, group_id)
+    ).fetchall()
+    for row in rows:
+        if exclude_user_id and row[0] == exclude_user_id:
+            continue
+        notify_user(conn, row[0], title, body)
+
 
 
 # ---------------------------------------------------------
@@ -1392,29 +1545,257 @@ def api_notifications():
 @app.route("/admin/campus", methods=["GET", "POST"])
 def admin_campus():
     if not admin_required(): return redirect(url_for("login"))
-    require_csrf() if request.method == "POST" else None
     conn=get_db_connection()
     if request.method == "POST":
-        kind=request.form.get("kind")
-        title=request.form.get("title", "").strip()
-        body=request.form.get("body", "").strip()
-        if kind == "announcement" and title and body:
-            conn.execute("INSERT INTO announcements(title,body,created_at) VALUES(?,?,?)", (title,body,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-            flash("Announcement published.", "success")
-        elif kind == "club" and title:
-            conn.execute("INSERT INTO clubs(name,description,created_at) VALUES(?,?,?)", (title,body,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-            flash("Club created.", "success")
-        elif kind == "event" and title and body and request.form.get("event_date"):
-            conn.execute("INSERT INTO events(title,description,event_date,location,created_at) VALUES(?,?,?,?,?)", (title,body,request.form.get("event_date"),request.form.get("location", "").strip(),datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-            flash("Event created.", "success")
-        else:
-            flash("Please complete the required fields.", "error")
-        conn.commit(); conn.close(); return redirect(url_for("admin_campus"))
-    announcements=conn.execute("SELECT * FROM announcements ORDER BY id DESC").fetchall()
-    clubs=conn.execute("SELECT * FROM clubs ORDER BY id DESC").fetchall()
-    events=conn.execute("SELECT * FROM events ORDER BY event_date ASC").fetchall()
+        require_csrf()
+        kind=request.form.get("kind", "").strip()
+        now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            if kind == "university":
+                name=request.form.get("name", "").strip()
+                domain=request.form.get("domain", "").strip().lower()
+                description=request.form.get("description", "").strip()
+                if not name: raise ValueError("University name is required.")
+                cur=conn.execute("INSERT INTO universities(name,domain,description,created_at) VALUES(?,?,?,?)",(name,domain,description,now))
+                uid=cur.lastrowid
+                conn.execute("INSERT OR IGNORE INTO branding_settings(university_id) VALUES(?)",(uid,))
+                flash("University created. You can now create its departments, batches and groups.","success")
+            elif kind == "department":
+                uid=request.form.get("university_id",type=int); name=request.form.get("name","").strip(); code=request.form.get("code","").strip(); desc=request.form.get("description","").strip()
+                if not uid or not name: raise ValueError("University and department name are required.")
+                conn.execute("INSERT INTO departments(university_id,name,code,description,created_at) VALUES(?,?,?,?,?)",(uid,name,code,desc,now)); flash("Department created.","success")
+            elif kind == "batch":
+                uid=request.form.get("university_id",type=int); did=request.form.get("department_id",type=int) or None; name=request.form.get("name","").strip(); sy=request.form.get("start_year",type=int); ey=request.form.get("end_year",type=int)
+                if not uid or not name: raise ValueError("University and batch name are required.")
+                conn.execute("INSERT INTO batches(university_id,department_id,name,start_year,end_year,created_at) VALUES(?,?,?,?,?,?)",(uid,did,name,sy,ey,now)); flash("Batch created.","success")
+            elif kind == "group":
+                uid=request.form.get("university_id",type=int); did=request.form.get("department_id",type=int) or None; name=request.form.get("name","").strip(); desc=request.form.get("description","").strip(); privacy=request.form.get("privacy","university")
+                if not uid or not name: raise ValueError("University and group name are required.")
+                conn.execute("INSERT INTO groups(university_id,department_id,name,description,privacy,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(uid,did,name,desc,privacy,None,now)); flash("Group created.","success")
+            elif kind == "announcement":
+                uid=request.form.get("university_id",type=int) or None; title=request.form.get("title","").strip(); body=request.form.get("body","").strip()
+                if not title or not body: raise ValueError("Title and announcement body are required.")
+                conn.execute("INSERT INTO announcements(university_id,title,body,created_at) VALUES(?,?,?,?)",(uid,title,body,now)); flash("Announcement published.","success")
+            elif kind == "club":
+                uid=request.form.get("university_id",type=int) or None; title=request.form.get("title","").strip(); body=request.form.get("body","").strip()
+                if not title: raise ValueError("Club name is required.")
+                conn.execute("INSERT INTO clubs(university_id,name,description,created_at) VALUES(?,?,?,?)",(uid,title,body,now)); flash("Club created.","success")
+            elif kind == "event":
+                uid=request.form.get("university_id",type=int) or None; title=request.form.get("title","").strip(); body=request.form.get("body","").strip(); date=request.form.get("event_date","").strip(); loc=request.form.get("location","").strip()
+                if not title or not date: raise ValueError("Event title and date are required.")
+                conn.execute("INSERT INTO events(university_id,title,description,event_date,location,created_at) VALUES(?,?,?,?,?,?)",(uid,title,body,date,loc,now)); flash("Event created.","success")
+            elif kind == "branding":
+                uid=request.form.get("university_id",type=int); primary=request.form.get("primary_color","#1456c4").strip(); secondary=request.form.get("secondary_color","#0f172a").strip(); accent=request.form.get("accent_color","#22c55e").strip(); domain=request.form.get("custom_domain","").strip().lower()
+                if not uid: raise ValueError("Choose a university.")
+                conn.execute("INSERT INTO branding_settings(university_id,primary_color,secondary_color,accent_color,custom_domain) VALUES(?,?,?,?,?) ON CONFLICT(university_id) DO UPDATE SET primary_color=excluded.primary_color,secondary_color=excluded.secondary_color,accent_color=excluded.accent_color,custom_domain=excluded.custom_domain",(uid,primary,secondary,accent,domain)); flash("Branding settings saved.","success")
+            elif kind == "assign_admin":
+                uid=request.form.get("user_id",type=int); rid=conn.execute("SELECT id FROM roles WHERE name='UNIVERSITY_ADMIN'").fetchone();
+                if not uid or not rid: raise ValueError("Choose a user.")
+                conn.execute("INSERT OR IGNORE INTO user_roles(user_id,role_id) VALUES(?,?)",(uid,rid[0])); flash("University administrator role assigned.","success")
+            else: raise ValueError("Unknown management action.")
+            conn.commit()
+        except Exception as e:
+            conn.rollback(); flash(str(e),"error")
+        conn.close(); return redirect(url_for("admin_campus"))
+    universities=conn.execute("SELECT * FROM universities ORDER BY name COLLATE NOCASE").fetchall()
+    departments=conn.execute("SELECT d.*,u.name university_name,(SELECT COUNT(*) FROM users x WHERE x.department_id=d.id) member_count FROM departments d JOIN universities u ON u.id=d.university_id ORDER BY u.name,d.name").fetchall()
+    batches=conn.execute("SELECT b.*,u.name university_name,d.name department_name,(SELECT COUNT(*) FROM users x WHERE x.batch_id=b.id) member_count FROM batches b JOIN universities u ON u.id=b.university_id LEFT JOIN departments d ON d.id=b.department_id ORDER BY u.name,b.name").fetchall()
+    groups=conn.execute("SELECT g.*,u.name university_name,d.name department_name,(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id) member_count FROM groups g JOIN universities u ON u.id=g.university_id LEFT JOIN departments d ON d.id=g.department_id ORDER BY g.id DESC").fetchall()
+    users=conn.execute("SELECT id,name,username,gmail FROM users ORDER BY name COLLATE NOCASE").fetchall()
+    announcements=conn.execute("SELECT a.*,u.name university_name FROM announcements a LEFT JOIN universities u ON u.id=a.university_id ORDER BY a.id DESC").fetchall()
+    clubs=conn.execute("SELECT c.*,u.name university_name FROM clubs c LEFT JOIN universities u ON u.id=c.university_id ORDER BY c.id DESC").fetchall()
+    events=conn.execute("SELECT e.*,u.name university_name,(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id=e.id) registration_count FROM events e LEFT JOIN universities u ON u.id=e.university_id ORDER BY e.event_date ASC").fetchall()
     conn.close()
-    return render_template("admin_campus.html", announcements=announcements, clubs=clubs, events=events, csrf=csrf_token())
+    return render_template("admin_campus.html",universities=universities,departments=departments,batches=batches,groups=groups,users=users,announcements=announcements,clubs=clubs,events=events,csrf=csrf_token())
+
+
+def group_access(conn, group_id, uid):
+    group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone()
+    user=conn.execute("SELECT university_id,department_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not group or not user: return group, user, False
+    member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()
+    admin=conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()
+    owner=(group["created_by"] == uid)
+    privacy=group["privacy"]
+    eligible = privacy == "public" or (privacy == "university" and user["university_id"] == group["university_id"]) or (privacy == "department" and user["department_id"] == group["department_id"] and user["university_id"] == group["university_id"]) or member or owner or admin
+    return group,user,bool(eligible)
+
+@app.route("/groups")
+def groups_page():
+    if not user_required(): return redirect(url_for("user_login"))
+    conn=get_db_connection(); uid=session["user_id"]
+    user=conn.execute("SELECT university_id,department_id FROM users WHERE id=?",(uid,)).fetchone()
+    groups=conn.execute("""
+        SELECT g.*,d.name department_name,u.name university_name,
+        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id) member_count,
+        EXISTS(SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=?) joined,
+        EXISTS(SELECT 1 FROM group_admins ga WHERE ga.group_id=g.id AND ga.user_id=?) is_admin
+        FROM groups g LEFT JOIN departments d ON d.id=g.department_id LEFT JOIN universities u ON u.id=g.university_id
+        WHERE g.privacy='public' OR (g.privacy='university' AND g.university_id=?) OR (g.privacy='department' AND g.university_id=? AND g.department_id=?)
+           OR g.created_by=? OR EXISTS(SELECT 1 FROM group_members gm2 WHERE gm2.group_id=g.id AND gm2.user_id=?)
+        ORDER BY g.name
+    """,(uid,uid,user["university_id"] if user else None,user["university_id"] if user else None,user["department_id"] if user else None,uid,uid)).fetchall()
+    departments=conn.execute("SELECT id,name,code FROM departments WHERE university_id=? ORDER BY name",(user["university_id"],)).fetchall() if user and user["university_id"] else []
+    conn.close(); return render_template("groups.html",groups=groups,csrf=csrf_token(),user=user,departments=departments)
+
+@app.route("/groups/create",methods=["POST"])
+def create_group():
+    if not user_required(): return redirect(url_for("user_login"))
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]
+    user=conn.execute("SELECT university_id,department_id FROM users WHERE id=?",(uid,)).fetchone()
+    name=request.form.get("name","").strip(); desc=request.form.get("description","").strip(); privacy=request.form.get("privacy","university").strip(); did=request.form.get("department_id",type=int) or None
+    if not name or privacy not in {"public","university","department","private"}: conn.close(); flash("Group name and a valid privacy option are required.","error"); return redirect(url_for("groups_page"))
+    if not user or not user["university_id"]: conn.close(); flash("Your account must be linked to a university before creating a group.","error"); return redirect(url_for("groups_page"))
+    if privacy=="department" and not did: conn.close(); flash("Choose a department for a department-only group.","error"); return redirect(url_for("groups_page"))
+    if did and not conn.execute("SELECT 1 FROM departments WHERE id=? AND university_id=?",(did,user["university_id"])).fetchone(): conn.close(); flash("Invalid department.","error"); return redirect(url_for("groups_page"))
+    now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    cur=conn.execute("INSERT INTO groups(university_id,department_id,name,description,privacy,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(user["university_id"],did,name,desc,privacy,uid,now))
+    gid=cur.lastrowid; conn.execute("INSERT INTO group_members(group_id,user_id,joined_at) VALUES(?,?,?)",(gid,uid,now)); conn.execute("INSERT INTO group_admins(group_id,user_id,created_at) VALUES(?,?,?)",(gid,uid,now)); conn.commit(); conn.close()
+    flash("Group created. You are the owner and first group administrator.","success"); return redirect(url_for("group_detail",group_id=gid))
+
+@app.route("/groups/<int:group_id>")
+def group_detail(group_id):
+    if not user_required(): return redirect(url_for("user_login"))
+    conn=get_db_connection(); uid=session["user_id"]; group,user,eligible=group_access(conn,group_id,uid)
+    if not group: conn.close(); abort(404)
+    member=bool(conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone())
+    is_admin=bool(conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()) or group["created_by"]==uid
+    pending=bool(conn.execute("SELECT 1 FROM group_join_requests WHERE group_id=? AND user_id=? AND status='pending'",(group_id,uid)).fetchone())
+    if group["privacy"]=="private" and not member and not is_admin: eligible=False
+    posts=conn.execute("""SELECT p.*,u.name,u.photo, (SELECT COUNT(*) FROM group_post_likes l WHERE l.post_id=p.id) like_count,
+        EXISTS(SELECT 1 FROM group_post_likes l2 WHERE l2.post_id=p.id AND l2.user_id=?) liked_by_me,
+        (SELECT COUNT(*) FROM group_post_comments c WHERE c.post_id=p.id) comment_count
+        FROM group_posts p JOIN users u ON u.id=p.user_id WHERE p.group_id=? ORDER BY p.id DESC""",(uid,group_id)).fetchall() if eligible else []
+    comments={p["id"]:conn.execute("SELECT c.*,u.name FROM group_post_comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? ORDER BY c.id",(p["id"],)).fetchall() for p in posts}
+    members=conn.execute("SELECT u.id,u.name,u.username,u.photo,EXISTS(SELECT 1 FROM group_admins ga WHERE ga.group_id=? AND ga.user_id=u.id) is_admin FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=? ORDER BY u.name",(group_id,group_id)).fetchall()
+    requests=conn.execute("SELECT u.id,u.name,u.username FROM group_join_requests r JOIN users u ON u.id=r.user_id WHERE r.group_id=? AND r.status='pending' ORDER BY r.created_at",(group_id,)).fetchall() if is_admin else []
+    conn.close(); return render_template("group_detail.html",group=group,posts=posts,comments=comments,members=members,requests=requests,member=member,is_admin=is_admin,pending=pending,eligible=eligible,csrf=csrf_token())
+
+@app.route("/groups/<int:group_id>/join",methods=["POST"])
+def join_group(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone(); user=conn.execute("SELECT university_id,department_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not group: conn.close(); return jsonify({"error":"group_not_found"}),404
+    exists=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()
+    if exists:
+        conn.execute("DELETE FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)); conn.execute("DELETE FROM group_join_requests WHERE group_id=? AND user_id=?",(group_id,uid)); joined=False; status="left"
+        notify_group_admins(conn, group_id, "Member left group", f"A member has left {group['name']}.", exclude_user_id=uid)
+    else:
+        eligible=group["privacy"]=="public" or (group["privacy"]=="university" and user["university_id"]==group["university_id"]) or (group["privacy"]=="department" and user["university_id"]==group["university_id"] and user["department_id"]==group["department_id"])
+        if group["privacy"]=="private":
+            conn.execute("INSERT OR REPLACE INTO group_join_requests(group_id,user_id,status,created_at) VALUES(?,?,?,?)",(group_id,uid,"pending",datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            notify_group_admins(conn, group_id, "New join request", f"A user requested to join {group['name']}.", exclude_user_id=uid)
+            conn.commit(); conn.close(); return jsonify({"joined":False,"pending":True,"status":"pending"})
+        if not eligible: conn.close(); return jsonify({"error":"not_eligible"}),403
+        conn.execute("INSERT INTO group_members(group_id,user_id,joined_at) VALUES(?,?,?)",(group_id,uid,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); joined=True; status="joined"
+        notify_group_admins(conn, group_id, "New group member", f"A new member joined {group['name']}.", exclude_user_id=uid)
+        notify_user(conn, uid, "Joined group", f"You joined {group['name']}.")
+    conn.commit(); conn.close(); return jsonify({"joined":joined,"pending":False,"status":status})
+
+@app.route("/groups/<int:group_id>/post",methods=["POST"])
+def group_post(group_id):
+    if not user_required(): return redirect(url_for("user_login"))
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; group,user,eligible=group_access(conn,group_id,uid); member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()
+    body=request.form.get("body","").strip()
+    if not group or not member or not body: conn.close(); flash("You must be a group member and provide a post.","error"); return redirect(url_for("group_detail",group_id=group_id))
+    conn.execute("INSERT INTO group_posts(group_id,user_id,body,created_at) VALUES(?,?,?,?)",(group_id,uid,body,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+    notify_group_admins(conn, group_id, "New group post", f"A new post was published in {group['name']}.", exclude_user_id=uid)
+    conn.commit(); conn.close(); return redirect(url_for("group_detail",group_id=group_id))
+
+@app.route("/group-post/<int:post_id>/like",methods=["POST"])
+def group_post_like(post_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; post=conn.execute("SELECT * FROM group_posts WHERE id=?",(post_id,)).fetchone(); member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(post["group_id"],uid)).fetchone() if post else None
+    if not post or not member: conn.close(); return jsonify({"error":"not_allowed"}),403
+    exists=conn.execute("SELECT 1 FROM group_post_likes WHERE post_id=? AND user_id=?",(post_id,uid)).fetchone()
+    if exists: conn.execute("DELETE FROM group_post_likes WHERE post_id=? AND user_id=?",(post_id,uid)); liked=False
+    else: conn.execute("INSERT INTO group_post_likes(post_id,user_id,created_at) VALUES(?,?,?)",(post_id,uid,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); liked=True
+    count=conn.execute("SELECT COUNT(*) FROM group_post_likes WHERE post_id=?",(post_id,)).fetchone()[0]; conn.commit(); conn.close(); return jsonify({"liked":liked,"count":count})
+
+@app.route("/group-post/<int:post_id>/comment",methods=["POST"])
+def group_post_comment(post_id):
+    if not user_required(): return redirect(url_for("user_login"))
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; post=conn.execute("SELECT * FROM group_posts WHERE id=?",(post_id,)).fetchone(); member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(post["group_id"],uid)).fetchone() if post else None; comment=request.form.get("comment","").strip()
+    if not post or not member or not comment: conn.close(); flash("Comment cannot be empty.","error"); return redirect(url_for("group_detail",group_id=post["group_id"] if post else 1))
+    conn.execute("INSERT INTO group_post_comments(post_id,user_id,comment,created_at) VALUES(?,?,?,?)",(post_id,uid,comment,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+    if post["user_id"] != uid: notify_user(conn, post["user_id"], "New comment", "Someone commented on your group post.")
+    notify_group_admins(conn, post["group_id"], "New group comment", "A new comment was added to a group post.", exclude_user_id=uid)
+    conn.commit(); gid=post["group_id"]; conn.close(); return redirect(url_for("group_detail",group_id=gid))
+
+@app.route("/groups/<int:group_id>/members/<int:user_id>/remove",methods=["POST"])
+def group_remove_member(group_id,user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone(); admin=bool(conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()) or (group and group["created_by"]==uid)
+    if not admin or user_id==group["created_by"]: conn.close(); return jsonify({"error":"not_allowed"}),403
+    conn.execute("DELETE FROM group_members WHERE group_id=? AND user_id=?",(group_id,user_id)); conn.execute("DELETE FROM group_admins WHERE group_id=? AND user_id=?",(group_id,user_id)); conn.commit(); conn.close(); return jsonify({"ok":True})
+
+@app.route("/groups/<int:group_id>/admins/<int:user_id>",methods=["POST"])
+def group_toggle_admin(group_id,user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone(); owner=group and group["created_by"]==uid; member=bool(conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,user_id)).fetchone())
+    if not owner or not member or user_id==uid: conn.close(); return jsonify({"error":"owner_only"}),403
+    exists=conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,user_id)).fetchone()
+    if exists: conn.execute("DELETE FROM group_admins WHERE group_id=? AND user_id=?",(group_id,user_id)); state=False
+    else: conn.execute("INSERT INTO group_admins(group_id,user_id,created_at) VALUES(?,?,?)",(group_id,user_id,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); state=True
+    conn.commit(); conn.close(); return jsonify({"is_admin":state})
+
+@app.route("/groups/<int:group_id>/requests/<int:user_id>",methods=["POST"])
+def group_request_action(group_id,user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); action=request.form.get("action","approve"); conn=get_db_connection(); uid=session["user_id"]; group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone(); admin=bool(conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()) or (group and group["created_by"]==uid)
+    if not admin: conn.close(); return jsonify({"error":"not_allowed"}),403
+    if action=="approve":
+        conn.execute("INSERT OR IGNORE INTO group_members(group_id,user_id,joined_at) VALUES(?,?,?)",(group_id,user_id,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+        notify_user(conn,user_id,"Join request approved",f"Your request to join {group['name']} was approved.")
+    else:
+        notify_user(conn,user_id,"Join request rejected",f"Your request to join {group['name']} was rejected.")
+    conn.execute("UPDATE group_join_requests SET status=? WHERE group_id=? AND user_id=?",("approved" if action=="approve" else "rejected",group_id,user_id)); conn.commit(); conn.close(); return redirect(url_for("group_detail",group_id=group_id))
+
+@app.route("/api/groups/<int:group_id>/updates")
+def group_updates(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    conn=get_db_connection(); uid=session["user_id"]; group,user,eligible=group_access(conn,group_id,uid)
+    if not group or not eligible:
+        conn.close(); return jsonify({"error":"not_allowed"}),403
+    member=bool(conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone())
+    if not member:
+        conn.close(); return jsonify({"error":"not_member"}),403
+    last_id=request.args.get("since",type=int) or 0
+    post_count=conn.execute("SELECT COUNT(*) FROM group_posts WHERE group_id=?",(group_id,)).fetchone()[0]
+    member_count=conn.execute("SELECT COUNT(*) FROM group_members WHERE group_id=?",(group_id,)).fetchone()[0]
+    request_count=conn.execute("SELECT COUNT(*) FROM group_join_requests WHERE group_id=? AND status='pending'",(group_id,)).fetchone()[0]
+    latest=conn.execute("SELECT id,created_at FROM group_posts WHERE group_id=? ORDER BY id DESC LIMIT 1",(group_id,)).fetchone()
+    new_posts=conn.execute("SELECT p.id,p.body,p.created_at,u.name FROM group_posts p JOIN users u ON u.id=p.user_id WHERE p.group_id=? AND p.id>? ORDER BY p.id",(group_id,last_id)).fetchall()
+    conn.close(); return jsonify({"post_count":post_count,"member_count":member_count,"pending_requests":request_count,"latest_post_id":latest["id"] if latest else 0,"new_posts":[dict(r) for r in new_posts]})
+
+
+@app.route("/admin/analytics")
+def admin_analytics():
+    if not admin_required(): return redirect(url_for("login"))
+    conn=get_db_connection()
+    stats={
+        "users":conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+        "universities":conn.execute("SELECT COUNT(*) FROM universities").fetchone()[0],
+        "departments":conn.execute("SELECT COUNT(*) FROM departments").fetchone()[0],
+        "batches":conn.execute("SELECT COUNT(*) FROM batches").fetchone()[0],
+        "groups":conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0],
+        "clubs":conn.execute("SELECT COUNT(*) FROM clubs").fetchone()[0],
+        "events":conn.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+        "posts":conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0],
+        "messages":conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
+        "unread_messages":conn.execute("SELECT COUNT(*) FROM messages WHERE is_read=0").fetchone()[0],
+        "storage_posts":conn.execute("SELECT COUNT(*) FROM posts WHERE media_token IS NOT NULL").fetchone()[0],
+    }
+    university_stats=conn.execute("SELECT u.name,COUNT(x.id) users,COUNT(DISTINCT d.id) departments FROM universities u LEFT JOIN users x ON x.university_id=u.id LEFT JOIN departments d ON d.university_id=u.id GROUP BY u.id ORDER BY users DESC").fetchall()
+    conn.close(); return render_template("analytics.html",stats=stats,university_stats=university_stats)
+
+@app.route("/admin/backup")
+def admin_backup():
+    if not admin_required(): return redirect(url_for("login"))
+    from flask import send_file
+    db_path=DB_FILE
+    if not os.path.isfile(db_path): abort(404)
+    return send_file(db_path,as_attachment=True,download_name="university_connect_backup.sqlite3",mimetype="application/octet-stream")
 
 
 # ---------------------------------------------------------
@@ -1628,25 +2009,71 @@ def admin_users():
     if query:
         like = f"%{query}%"
         users = conn.execute(
-            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name
+            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name,
+                      un.name AS university_name, d.name AS department_name, b.name AS batch_name
                FROM users u
                LEFT JOIN user_roles ur ON ur.user_id = u.id
                LEFT JOIN roles r ON r.id = ur.role_id
+               LEFT JOIN universities un ON un.id = u.university_id
+               LEFT JOIN departments d ON d.id = u.department_id
+               LEFT JOIN batches b ON b.id = u.batch_id
                WHERE u.name LIKE ? OR u.username LIKE ? OR u.gmail LIKE ? OR u.phone LIKE ?
                ORDER BY u.id DESC""",
             (like, like, like, like)
         ).fetchall()
     else:
         users = conn.execute(
-            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name
+            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name,
+                      un.name AS university_name, d.name AS department_name, b.name AS batch_name
                FROM users u
                LEFT JOIN user_roles ur ON ur.user_id = u.id
                LEFT JOIN roles r ON r.id = ur.role_id
+               LEFT JOIN universities un ON un.id = u.university_id
+               LEFT JOIN departments d ON d.id = u.department_id
+               LEFT JOIN batches b ON b.id = u.batch_id
                ORDER BY u.id DESC"""
         ).fetchall()
+    universities=conn.execute("SELECT id,name FROM universities ORDER BY name").fetchall()
+    departments=conn.execute("SELECT id,university_id,name FROM departments ORDER BY name").fetchall()
+    batches=conn.execute("SELECT id,university_id,department_id,name FROM batches ORDER BY name").fetchall()
+    roles=conn.execute("SELECT name FROM roles ORDER BY id").fetchall()
     conn.close()
-    return render_template("users.html", users=users, query=query)
+    return render_template("users.html", users=users, query=query, universities=universities, departments=departments, batches=batches, roles=roles)
 
+
+@app.route("/admin/users/<int:user_id>/organization", methods=["POST"])
+def admin_assign_organization(user_id):
+    if not admin_required(): return redirect(url_for("login"))
+    require_csrf(); conn=get_db_connection()
+    user=conn.execute("SELECT id FROM users WHERE id=?",(user_id,)).fetchone()
+    if not user:
+        conn.close(); flash("User not found.","error"); return redirect(url_for("admin_users"))
+    university_id=request.form.get("university_id",type=int) or None
+    department_id=request.form.get("department_id",type=int) or None
+    batch_id=request.form.get("batch_id",type=int) or None
+    role_name=request.form.get("role_name","STUDENT").strip()
+    try:
+        if university_id and not conn.execute("SELECT 1 FROM universities WHERE id=?",(university_id,)).fetchone():
+            raise ValueError("Invalid university selected.")
+        if department_id:
+            dep=conn.execute("SELECT university_id FROM departments WHERE id=?",(department_id,)).fetchone()
+            if not dep or dep["university_id"] != university_id:
+                raise ValueError("Department does not belong to the selected university.")
+        if batch_id:
+            batch=conn.execute("SELECT university_id,department_id FROM batches WHERE id=?",(batch_id,)).fetchone()
+            if not batch or batch["university_id"] != university_id or (batch["department_id"] and batch["department_id"] != department_id):
+                raise ValueError("Batch does not match the selected university/department.")
+        role=conn.execute("SELECT id FROM roles WHERE name=?",(role_name,)).fetchone()
+        if not role:
+            raise ValueError("Invalid role selected.")
+        conn.execute("UPDATE users SET university_id=?,department_id=?,batch_id=? WHERE id=?",(university_id,department_id,batch_id,user_id))
+        conn.execute("DELETE FROM user_roles WHERE user_id=?",(user_id,))
+        conn.execute("INSERT INTO user_roles(user_id,role_id) VALUES(?,?)",(user_id,role["id"]))
+        notify_user(conn,user_id,"Organization updated",f"Your university/department/batch and role were updated to {role_name}.")
+        conn.commit(); conn.close(); flash("University, department, batch and role updated.","success")
+    except Exception as e:
+        conn.rollback(); conn.close(); flash(f"Could not update organization: {e}","error")
+    return redirect(url_for("admin_users"))
 
 @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
 def admin_delete_user(user_id):
@@ -1655,6 +2082,8 @@ def admin_delete_user(user_id):
     require_csrf()
     conn = get_db_connection()
     user = conn.execute("SELECT name, gmail FROM users WHERE id=?", (user_id,)).fetchone()
+    if session.get("admin_user_id") and int(session["admin_user_id"]) == user_id:
+        conn.close(); flash("You cannot delete the administrator account currently in use.", "error"); return redirect(url_for("admin_users"))
     if not user:
         conn.close()
         flash("User not found.", "error")
@@ -1766,28 +2195,20 @@ def view_profile(user_id):
                     profile["relationship_status"]
             }
 
-            conn.execute(
-                """
-                UPDATE users
-                SET
-                    username = ?,
-                    age = ?,
-                    nickname = ?,
-                    partner = ?,
-                    relationship_status = ?
-                WHERE id = ?
-                """,
-                (
-                    username,
-                    age if age else None,
-                    nickname,
-                    partner,
-                    status,
-                    user_id
+            try:
+                duplicate = conn.execute("SELECT id FROM users WHERE lower(username)=? AND id!=?", (username.lower(), user_id)).fetchone() if username else None
+                if duplicate:
+                    raise ValueError("That username is already in use.")
+                conn.execute(
+                    """UPDATE users SET username=?, age=?, nickname=?, partner=?, relationship_status=? WHERE id=?""",
+                    (username, age if age else None, nickname, partner, status, user_id)
                 )
-            )
-
-            conn.commit()
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                flash(f"Profile update failed: {exc}", "error")
+                conn.close()
+                return redirect(url_for("view_profile", user_id=user_id))
 
             changes = []
 

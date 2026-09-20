@@ -1,123 +1,70 @@
 # University Connect
 
-A Flask-based university community platform for student profiles, messaging, a private newsfeed, media, admin controls and the foundation for multi-university SaaS.
+A Flask-based university community platform with student profiles, social feed, private messaging and campus management.
 
-## What is included in this v2 package
+## Current commercial MVP
 
-- Secure environment-based admin credentials
-- `.env` loading when running `python app.py` directly
-- CSRF protection on state-changing admin/user routes
-- HttpOnly/SameSite session cookies and production HTTPS switches
-- Security headers and friendly error pages
-- Admin **User Management** page with search, profile editing and deletion
-- Password hashing with Werkzeug
-- Upload extension + basic image magic-byte validation
-- Activity logging
-- Commercial foundation tables for universities, roles, announcements, clubs, events, notifications and subscriptions
-- SQLite MVP database with additive migrations
-- Gunicorn production dependency and deployment examples
-- Basic automated tests
+### Basic
+- Student directory
+- Profiles / CV information
+- Private messaging
+- Announcements
+- Admin dashboard
+
+### Professional MVP
+- Posts, likes and comments
+- Universities
+- Departments
+- Batches
+- Groups and group membership
+- Clubs
+- Events and event registration
+- Notifications
+- Platform analytics
+- Branding configuration
+
+### Enterprise foundation
+- Multiple administrators via roles
+- Database backup download
+- Custom-domain configuration storage
+- Role framework for university/depart­ment/moderator/teacher/student/alumni
+
+## Important production gaps
+
+This is a commercial MVP foundation, not yet a finished SaaS billing platform. Payment processing, automated custom-domain DNS/SSL, strict per-tenant authorization across every route, PostgreSQL, object storage, WebSockets and production observability still need implementation before selling to institutions at scale.
 
 ## Run locally
 
-### Windows
+Use the supplied installation/start scripts and configure `.env` from `.env.example`.
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-copy .env.example .env
-python setup_local.py
-python app.py
-```
+## Group / Community Features (V5)
 
-Open:
-- User site: `http://127.0.0.1:5000/user-login`
-- Registration: `http://127.0.0.1:5000/register`
-- Admin: `http://127.0.0.1:5000/login`
-- Admin users: `http://127.0.0.1:5000/admin/users`
+Groups are now user-created communities, not admin-only objects. A logged-in user linked to a university can create a group and becomes its owner and first group admin.
 
-### Linux/macOS
+Privacy modes:
+- Public — any logged-in user can join.
+- University — members must belong to the group's university.
+- Department — members must belong to the selected department.
+- Private — users submit join requests; group admins approve or reject them.
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
-python setup_local.py
-python app.py
-```
+Group features:
+- Create and join/leave groups
+- Group owner and additional group admins
+- Group feed with text posts
+- Likes and comments
+- Member list
+- Remove members
+- Promote/demote group admins
+- Private-group join requests with approval/rejection
+- University and department visibility rules
 
-## Admin credentials
+## Admin Dashboard Login
 
-The username defaults to `admin` unless `ADMIN_USER` is changed. The password is the one you choose during local setup; it is stored only as a password hash in `.env`. There is no production `password123` fallback.
+The public domain opens the user portal first. The admin dashboard is protected and is not linked from the public user login page.
 
-## Production
+1. Open: `/login`
+2. Username: the value of `ADMIN_USER` (default local username: `admin`)
+3. Password: the admin password configured by `setup_local.py` or `ADMIN_PASSWORD_HASH` in `.env`
+4. After successful login you are redirected to `/admin`.
 
-Use **Nginx → Gunicorn → Flask**. Do not expose Flask's development server to the internet. Set:
-
-```text
-APP_ENV=production
-FLASK_SECRET_KEY=<long-random-secret>
-ADMIN_USER=<admin-username>
-ADMIN_PASSWORD_HASH=<Werkzeug-hash>
-COOKIE_SECURE=1
-REQUIRE_HTTPS=1
-TRUST_PROXY=1
-SITE_NAME=University Connect
-```
-
-Example Gunicorn command:
-
-```bash
-gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
-```
-
-Keep `.env`, `database.db`, uploaded media and private media out of Git. Terminate TLS at Nginx with a valid certificate and enable HSTS.
-
-## Commercial roadmap foundation
-
-The schema now contains the building blocks for:
-
-- universities and university-specific data
-- SUPER_ADMIN / UNIVERSITY_ADMIN / DEPARTMENT_ADMIN / MODERATOR / TEACHER / STUDENT / ALUMNI roles
-- announcements
-- clubs and club membership
-- events and registrations
-- notifications
-- subscriptions
-
-The existing application still uses SQLite and the current profile fields, so the next major architectural migration is PostgreSQL + strict tenant isolation. That migration should be done as a deliberate database migration rather than silently replacing the working MVP. Billing also requires a payment provider and credentials, so the subscription table is only the data foundation at this stage.
-
-## Security
-
-This project is not “unhackable”. Production security also depends on TLS, host configuration, dependency updates, backups, database permissions, monitoring, malware scanning, rate limiting and infrastructure security.
-
-## Public entry point and admin access
-
-- `/` is the public user portal entry point. Visitors are sent to the user login page; authenticated users go directly to their user home.
-- The admin dashboard is at `/admin` and is protected by the admin session.
-- The public user interface does not display an admin-login link. Administrators must navigate directly to `/login`.
-- `/login` is the administrator authentication page; successful authentication opens `/admin`.
-
-## Messaging and campus services update
-
-### Messaging
-- Chat sending now includes CSRF correctly.
-- Chat supports AJAX sending without a page reload.
-- Open chats poll `/api/messages/<user_id>` every 2 seconds for new messages.
-- New messages are appended live and the conversation auto-scrolls.
-- Incoming messages are marked read while the conversation is open.
-
-### Campus services
-The earlier database tables were only the foundation; they did not constitute finished user-facing services. This build adds working MVP screens/routes for:
-- Announcements
-- Clubs with join/leave
-- Events with register/unregister
-- Notifications with mark-as-read and JSON endpoint
-- Admin campus management at `/admin/campus`
-
-### Still foundation-only
-- Subscription/billing is not a payment system yet.
-- Multi-university tables/roles exist as a foundation, but full tenant isolation and role-management UI are not complete.
-- Real-time messaging uses lightweight polling rather than WebSockets, so it works with ordinary WSGI hosting without requiring a separate socket service.
+For a fresh local installation, run `python setup_local.py` once and choose the admin password. Do not use the development fallback password in a real deployment.
