@@ -1,79 +1,101 @@
-# University Connect — Production-Ready Flask Package
+# University Connect
 
-A Flask-based university social/community site with student profiles, CV fields, newsfeed posts, comments, likes, messaging, galleries, admin controls, and configurable site branding.
+A Flask-based university community platform for student profiles, messaging, a private newsfeed, media, admin controls and the foundation for multi-university SaaS.
 
-## Included
+## What is included in this v2 package
 
-- `app.py` — main Flask application
-- `templates/` — all HTML templates from the supplied project
-- `requirements.txt` — runtime dependencies
-- `.env.example` — configuration template
-- `setup_local.py` — creates a local `.env` and securely hashes the admin password
-- Windows and Linux setup/start scripts
-- `start_production.sh` — Gunicorn production example
-- `nginx_university_site.conf.example` — HTTPS reverse-proxy example
-- `static/uploads/` and `private_media/posts/` directories
+- Secure environment-based admin credentials
+- `.env` loading when running `python app.py` directly
+- CSRF protection on state-changing admin/user routes
+- HttpOnly/SameSite session cookies and production HTTPS switches
+- Security headers and friendly error pages
+- Admin **User Management** page with search, profile editing and deletion
+- Password hashing with Werkzeug
+- Upload extension + basic image magic-byte validation
+- Activity logging
+- Commercial foundation tables for universities, roles, announcements, clubs, events, notifications and subscriptions
+- SQLite MVP database with additive migrations
+- Gunicorn production dependency and deployment examples
+- Basic automated tests
 
 ## Run locally
 
 ### Windows
 
-1. Run `install_windows.bat`.
-2. Choose an admin password when prompted.
-3. Run `start_windows.bat`.
-4. Open `http://127.0.0.1:5000/user-login`.
-5. Admin login: `http://127.0.0.1:5000/login`.
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+copy .env.example .env
+python setup_local.py
+python app.py
+```
+
+Open:
+- User site: `http://127.0.0.1:5000/user-login`
+- Registration: `http://127.0.0.1:5000/register`
+- Admin: `http://127.0.0.1:5000/login`
+- Admin users: `http://127.0.0.1:5000/admin/users`
 
 ### Linux/macOS
 
 ```bash
-./install_linux.sh
-./start_linux.sh
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+python setup_local.py
+python app.py
 ```
 
-## Production deployment
+## Admin credentials
 
-Use a real WSGI server such as Gunicorn behind Nginx. Flask's built-in development server is intended for development, not production. See the official Flask deployment guidance. 
+The username defaults to `admin` unless `ADMIN_USER` is changed. The password is the one you choose during local setup; it is stored only as a password hash in `.env`. There is no production `password123` fallback.
 
-Before starting production, set:
+## Production
+
+Use **Nginx → Gunicorn → Flask**. Do not expose Flask's development server to the internet. Set:
 
 ```text
 APP_ENV=production
-FLASK_SECRET_KEY=<long random secret>
-ADMIN_USER=<admin username>
-ADMIN_PASSWORD_HASH=<Werkzeug password hash>
+FLASK_SECRET_KEY=<long-random-secret>
+ADMIN_USER=<admin-username>
+ADMIN_PASSWORD_HASH=<Werkzeug-hash>
 COOKIE_SECURE=1
 REQUIRE_HTTPS=1
 TRUST_PROXY=1
 SITE_NAME=University Connect
 ```
 
-Example:
+Example Gunicorn command:
 
 ```bash
 gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
 ```
 
-Terminate TLS at Nginx using a valid certificate and redirect HTTP to HTTPS. Do not expose `private_media/` as a public static directory.
+Keep `.env`, `database.db`, uploaded media and private media out of Git. Terminate TLS at Nginx with a valid certificate and enable HSTS.
 
-## Important security notes
+## Commercial roadmap foundation
 
-- The production app refuses to start without `FLASK_SECRET_KEY` and `ADMIN_PASSWORD_HASH`.
-- The old hard-coded admin password fallback has been removed.
-- Debug mode is disabled in `app.py`.
-- CSRF checks are present on state-changing routes.
-- Sessions use HttpOnly/SameSite settings, with Secure enabled when `COOKIE_SECURE=1`.
-- Keep `.env`, `database.db`, and uploaded/private media out of public repositories.
-- Back up `database.db` and uploaded media before upgrades.
-- For larger deployments, migrate from SQLite to PostgreSQL and use object storage for media.
+The schema now contains the building blocks for:
 
-## Database
+- universities and university-specific data
+- SUPER_ADMIN / UNIVERSITY_ADMIN / DEPARTMENT_ADMIN / MODERATOR / TEACHER / STUDENT / ALUMNI roles
+- announcements
+- clubs and club membership
+- events and registrations
+- notifications
+- subscriptions
 
-The application creates/migrates `database.db` automatically on startup. This package intentionally does not include a database containing real users.
+The existing application still uses SQLite and the current profile fields, so the next major architectural migration is PostgreSQL + strict tenant isolation. That migration should be done as a deliberate database migration rather than silently replacing the working MVP. Billing also requires a payment provider and credentials, so the subscription table is only the data foundation at this stage.
 
-## HTTPS / MITM protection
+## Security
 
-Application code alone cannot make a site “unhackable” or completely MITM-proof. Correct TLS configuration is required. Use Nginx (or another trusted reverse proxy), a valid certificate, HTTPS redirects, HSTS, `COOKIE_SECURE=1`, and `REQUIRE_HTTPS=1`.
+This project is not “unhackable”. Production security also depends on TLS, host configuration, dependency updates, backups, database permissions, monitoring, malware scanning, rate limiting and infrastructure security.
 
-Official Flask documentation:
-https://flask.palletsprojects.com/en/stable/deploying/
+## Public entry point and admin access
+
+- `/` is the public user portal entry point. Visitors are sent to the user login page; authenticated users go directly to their user home.
+- The admin dashboard is at `/admin` and is protected by the admin session.
+- The public user interface does not display an admin-login link. Administrators must navigate directly to `/login`.
+- `/login` is the administrator authentication page; successful authentication opens `/admin`.

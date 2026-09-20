@@ -241,6 +241,115 @@ def init_db():
         )
     """)
 
+    # -----------------------------------------------------
+    # Commercial foundation: universities, roles and campus modules.
+    # These tables are additive so the existing MVP keeps working.
+    # -----------------------------------------------------
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS universities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            domain TEXT DEFAULT '',
+            logo TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_roles (
+            user_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, role_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS clubs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS club_members (
+            club_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (club_id, user_id),
+            FOREIGN KEY (club_id) REFERENCES clubs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            event_date TEXT NOT NULL,
+            location TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS event_registrations (
+            event_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            registered_at TEXT NOT NULL,
+            PRIMARY KEY (event_id, user_id),
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_id INTEGER,
+            plan TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'trial',
+            starts_at TEXT NOT NULL,
+            renews_at TEXT,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE CASCADE
+        )
+    """)
+    for role_name in ("SUPER_ADMIN", "UNIVERSITY_ADMIN", "DEPARTMENT_ADMIN", "MODERATOR", "TEACHER", "STUDENT", "ALUMNI"):
+        conn.execute("INSERT OR IGNORE INTO roles(name) VALUES(?)", (role_name,))
+
+    if "university_id" not in existing_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN university_id INTEGER DEFAULT NULL")
+
     # Admin-controlled website settings. The public application never exposes
     # a write path to this table.
     conn.execute("""
@@ -294,6 +403,26 @@ def allowed_file(filename):
         "." in filename
         and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
     )
+
+
+def validate_image_signature(file_storage):
+    """Basic magic-byte validation for uploaded raster images."""
+    try:
+        pos = file_storage.stream.tell()
+        header = file_storage.stream.read(16)
+        file_storage.stream.seek(pos)
+    except Exception:
+        return False
+
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if header.startswith(b"\xff\xd8\xff"):
+        return True
+    if header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+        return True
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return True
+    return False
 
 
 def generate_unique_filename(original_filename, prefix="file"):
@@ -449,7 +578,7 @@ def register():
 
         filename = "default_profile.png"
         if file and file.filename:
-            if not allowed_file(file.filename):
+            if not allowed_file(file.filename) or not validate_image_signature(file):
                 conn.close()
                 flash("Invalid profile image format.", "error")
                 return render_template("register.html")
@@ -865,7 +994,7 @@ def profile_settings():
 
             filename = profile["photo"]
             if photo and photo.filename:
-                if not allowed_file(photo.filename):
+                if not allowed_file(photo.filename) or not validate_image_signature(photo):
                     flash("Invalid profile image format.", "error")
                     conn.close()
                     return redirect(url_for("profile_settings"))
@@ -1084,6 +1213,7 @@ def send_message():
     if not user_required():
         return redirect(url_for("user_login"))
 
+    require_csrf()
     sender_id = session["user_id"]
     receiver_id = request.form.get("receiver_id", type=int)
     message_text = request.form.get("message", "").strip()
@@ -1130,9 +1260,22 @@ def send_message():
 # Dashboard
 # ---------------------------------------------------------
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
+def landing():
+    """Public entry point: always open the user portal first.
+
+    The admin panel is deliberately not linked from the public UI.
+    Administrators must use the dedicated admin login route.
+    """
+    if user_required():
+        return redirect(url_for("user_home"))
+    return redirect(url_for("user_login"))
+
+
+@app.route("/admin", methods=["GET", "POST"])
 def home():
 
+    # Admin dashboard is never public.
     if not admin_required():
         return redirect(url_for("login"))
 
@@ -1311,6 +1454,59 @@ def home():
 
 
 # ---------------------------------------------------------
+# Admin user management
+# ---------------------------------------------------------
+
+@app.route("/admin/users")
+def admin_users():
+    if not admin_required():
+        return redirect(url_for("login"))
+
+    query = request.args.get("q", "").strip()
+    conn = get_db_connection()
+    if query:
+        like = f"%{query}%"
+        users = conn.execute(
+            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name
+               FROM users u
+               LEFT JOIN user_roles ur ON ur.user_id = u.id
+               LEFT JOIN roles r ON r.id = ur.role_id
+               WHERE u.name LIKE ? OR u.username LIKE ? OR u.gmail LIKE ? OR u.phone LIKE ?
+               ORDER BY u.id DESC""",
+            (like, like, like, like)
+        ).fetchall()
+    else:
+        users = conn.execute(
+            """SELECT u.*, COALESCE(r.name, 'STUDENT') AS role_name
+               FROM users u
+               LEFT JOIN user_roles ur ON ur.user_id = u.id
+               LEFT JOIN roles r ON r.id = ur.role_id
+               ORDER BY u.id DESC"""
+        ).fetchall()
+    conn.close()
+    return render_template("users.html", users=users, query=query)
+
+
+@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+def admin_delete_user(user_id):
+    if not admin_required():
+        return redirect(url_for("login"))
+    require_csrf()
+    conn = get_db_connection()
+    user = conn.execute("SELECT name, gmail FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        flash("User not found.", "error")
+        return redirect(url_for("admin_users"))
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    log_activity("DELETE_USER", f"Deleted user: {user['name']} ({user['gmail']})", user_id)
+    flash("User deleted successfully.", "success")
+    return redirect(url_for("admin_users"))
+
+
+# ---------------------------------------------------------
 # View / edit profile
 # ---------------------------------------------------------
 
@@ -1342,6 +1538,7 @@ def view_profile(user_id):
 
     if request.method == "POST":
 
+        require_csrf()
         form_identifier = request.form.get(
             "form_type"
         )
@@ -1492,7 +1689,7 @@ def view_profile(user_id):
                 if not file or not file.filename:
                     continue
 
-                if not allowed_file(file.filename):
+                if not allowed_file(file.filename) or not validate_image_signature(file):
                     continue
 
                 filename = generate_unique_filename(
@@ -1823,6 +2020,35 @@ def activity_log():
         "activity_log.html",
         logs=logs
     )
+
+
+# ---------------------------------------------------------
+# Error pages
+# ---------------------------------------------------------
+
+@app.errorhandler(400)
+def bad_request(error):
+    return render_template("error.html", code=400, title="Bad request", message=getattr(error, "description", "The request could not be processed.")), 400
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    return render_template("error.html", code=403, title="Access denied", message="You do not have permission to access this page."), 403
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return render_template("error.html", code=404, title="Page not found", message="The page you requested does not exist."), 404
+
+
+@app.errorhandler(413)
+def too_large(error):
+    return render_template("error.html", code=413, title="File too large", message="The uploaded file is larger than the allowed limit."), 413
+
+
+@app.errorhandler(500)
+def server_error(error):
+    return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
 
 # ---------------------------------------------------------
