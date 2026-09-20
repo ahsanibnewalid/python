@@ -2,6 +2,8 @@ import os
 import sqlite3
 import uuid
 import secrets
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime
 
 from flask import (
@@ -32,10 +34,16 @@ if os.environ.get("TRUST_PROXY", "0") == "1":
 # Configuration
 # ---------------------------------------------------------
 
-app.secret_key = os.environ.get(
-    "FLASK_SECRET_KEY",
-    "change-this-secret-key-in-production"
-)
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
+APP_ENV = os.environ.get("APP_ENV", "development").lower()
+
+if APP_ENV == "production" and not FLASK_SECRET_KEY:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY must be set when APP_ENV=production."
+    )
+
+# Development-only ephemeral key. It invalidates sessions after restart.
+app.secret_key = FLASK_SECRET_KEY or secrets.token_hex(32)
 
 UPLOAD_FOLDER = os.path.join("static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
@@ -64,10 +72,19 @@ os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 
-ADMIN_PASSWORD_HASH = os.environ.get(
-    "ADMIN_PASSWORD_HASH",
-    generate_password_hash("password123")
-)
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
+
+if not ADMIN_PASSWORD_HASH:
+    if APP_ENV == "production":
+        raise RuntimeError(
+            "ADMIN_PASSWORD_HASH must be set when APP_ENV=production."
+        )
+    # Development-only credential. Set ADMIN_PASSWORD_HASH before deployment.
+    ADMIN_PASSWORD_HASH = generate_password_hash("dev-only-change-me")
+    print(
+        "WARNING: Using development-only admin password. "
+        "Set ADMIN_PASSWORD_HASH before deployment."
+    )
 
 
 # ---------------------------------------------------------
@@ -1813,4 +1830,4 @@ def activity_log():
 # ---------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)

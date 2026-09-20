@@ -1,0 +1,45 @@
+UNIVERSITY SOCIAL SITE - NEWSFEED + CV + ADMIN SITE NAME + HTTPS HARDENING
+
+Included:
+- Central student newsfeed with photo/reel posts, likes, comments and load-more pagination.
+- Post media stored privately outside static/ and served only through authenticated routes.
+- Responsive student home, messaging and job-ready CV profile.
+- Current study fields: university, student ID, study status, department/major, academic year and semester.
+- Only an authenticated administrator can change the website name from the Admin Panel.
+- Website name is stored in the site_settings database table and is shown throughout the UI.
+- CSRF protection on authentication and state-changing forms/actions.
+- Security headers including CSP, HSTS when HTTPS is active, clickjacking protection, MIME sniffing protection and restrictive permissions policy.
+- Optional HTTPS enforcement with REQUIRE_HTTPS=1.
+- Optional trusted reverse-proxy support with TRUST_PROXY=1.
+- Secure session-cookie options for HTTPS deployments.
+
+IMPORTANT
+No web application can honestly be called “unhackable” or completely MITM-proof by application code alone. MITM resistance requires correctly configured TLS/HTTPS between the user and the server. For deployment, terminate TLS at Nginx (or another trusted reverse proxy), use a valid certificate, redirect HTTP to HTTPS, enable HSTS, use COOKIE_SECURE=1 and REQUIRE_HTTPS=1, and keep private_media/ outside the web server's directly served directories.
+
+PRODUCTION ENVIRONMENT
+FLASK_SECRET_KEY=<long random secret>
+ADMIN_USER=<admin username>
+ADMIN_PASSWORD_HASH=<Werkzeug password hash>
+COOKIE_SECURE=1
+REQUIRE_HTTPS=1
+TRUST_PROXY=1
+SITE_NAME=University Connect
+
+Do not commit these secrets to Git.
+
+DEPLOYMENT
+1. Keep database.db and static/uploads.
+2. Install Flask/Werkzeug and a production WSGI server such as Gunicorn.
+3. Put Nginx in front of Gunicorn and install a valid TLS certificate.
+4. Use the included nginx_university_site.conf.example as a starting point.
+5. Make sure Nginx does NOT expose private_media/.
+6. Run the app behind Gunicorn, for example: gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+7. Set REQUIRE_HTTPS=1, COOKIE_SECURE=1 and TRUST_PROXY=1 in the production environment.
+
+LOCAL DEVELOPMENT
+python app.py
+Then open http://127.0.0.1:5000/user-login
+Registration: http://127.0.0.1:5000/register
+Admin: http://127.0.0.1:5000/login
+
+Database migrations run automatically when the app starts.
