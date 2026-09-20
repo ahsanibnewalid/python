@@ -31,12 +31,64 @@ button{margin-top:10px;background:#0066cc;color:white;border:0;padding:11px 20px
 {% else %}<div style="text-align:center;color:#888;margin:auto">No messages yet. Say hello!</div>{% endfor %}
 </div>
 <div class="composer">
-<form action="{{ url_for('send_message') }}" method="POST">
+<form id="chatForm" action="{{ url_for('send_message') }}" method="POST">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="receiver_id" value="{{ other_user['id'] }}">
 <textarea name="message" maxlength="5000" placeholder="Write a message..." required autofocus></textarea>
-<button type="submit">Send Message</button>
+<button id="sendBtn" type="submit">Send Message</button>
 </form>
 </div>
 </div>
+
+<script>
+const CURRENT_USER_ID={{ current_user["id"] }};
+const OTHER_USER_ID={{ other_user["id"] }};
+const CSRF={{ csrf_token()|tojson }};
+const box=document.querySelector('.messages');
+const form=document.getElementById('chatForm');
+const textarea=form.querySelector('textarea');
+const sendBtn=document.getElementById('sendBtn');
+let lastId=Number({% if chat_messages %}{{ chat_messages[-1]["id"] }}{% else %}0{% endif %});
+
+function appendMessage(m){
+  if(document.querySelector('[data-message-id="'+m.id+'"]')) return;
+  const wrap=document.createElement('div');
+  wrap.className='bubble '+(m.sender_id===CURRENT_USER_ID?'mine':'theirs');
+  wrap.dataset.messageId=m.id;
+  const text=document.createTextNode(m.message);
+  const time=document.createElement('div'); time.className='time'; time.textContent=m.created_at;
+  wrap.appendChild(text); wrap.appendChild(time); box.appendChild(wrap);
+  box.scrollTop=box.scrollHeight;
+}
+document.querySelectorAll('.bubble').forEach((el,i)=>{
+  const ids={{ chat_messages|map(attribute='id')|list|tojson }}; if(ids[i]!==undefined) el.dataset.messageId=ids[i];
+});
+box.scrollTop=box.scrollHeight;
+
+form.addEventListener('submit', async e=>{
+  e.preventDefault();
+  const text=textarea.value.trim(); if(!text) return;
+  sendBtn.disabled=true;
+  const body=new URLSearchParams(new FormData(form));
+  try{
+    const r=await fetch(form.action,{method:'POST',body,headers:{'X-Requested-With':'XMLHttpRequest'}});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Message could not be sent');
+    appendMessage(d.message); lastId=Math.max(lastId,d.message.id); textarea.value=''; textarea.focus();
+  }catch(err){ alert(err.message); }
+  finally{ sendBtn.disabled=false; }
+});
+
+async function pollMessages(){
+  try{
+    const r=await fetch('/api/messages/'+OTHER_USER_ID+'?since_id='+lastId,{cache:'no-store'});
+    if(!r.ok) return;
+    const d=await r.json();
+    d.messages.forEach(m=>{appendMessage(m); lastId=Math.max(lastId,m.id);});
+  }catch(e){}
+}
+setInterval(pollMessages,2000);
+pollMessages();
+</script>
 </body>
 </html>
