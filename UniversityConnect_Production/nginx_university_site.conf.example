@@ -1,0 +1,43 @@
+# Example Nginx configuration. Replace example.edu.bd and certificate paths.
+# Keep private_media/ OUTSIDE Nginx's root/public directory.
+
+limit_req_zone $binary_remote_addr zone=student_app:10m rate=10r/s;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name example.edu.bd www.example.edu.bd;
+    return 308 https://example.edu.bd$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name example.edu.bd www.example.edu.bd;
+
+    ssl_certificate /etc/letsencrypt/live/example.edu.bd/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.edu.bd/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # HSTS is also emitted by Flask when it sees HTTPS.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    client_max_body_size 60m;
+
+    location / {
+        limit_req zone=student_app burst=30 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # Do not add a location block that aliases or exposes private_media/.
+}

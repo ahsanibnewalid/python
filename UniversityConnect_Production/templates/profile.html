@@ -1,0 +1,560 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>{{ profile['name'] }} - Profile</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .back-nav {
+            margin-bottom: 20px;
+            display: inline-block;
+            color: #0066cc;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .profile-layout {
+            display: flex;
+            gap: 30px;
+        }
+
+        .info-card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            width: 400px;
+            height: fit-content;
+        }
+
+        .profile-pic {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            display: block;
+            margin: 0 auto 15px auto;
+            border: 3px solid #0066cc;
+        }
+
+        .user-title {
+            text-align: center;
+            margin: 0 0 5px 0;
+        }
+
+        .user-email {
+            text-align: center;
+            color: #666;
+            margin: 0 0 25px 0;
+            font-size: 14px;
+        }
+
+        .gallery-card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            flex: 1;
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fill, minmax(170px, 1fr));
+            gap: 18px;
+            margin-top: 20px;
+        }
+
+        .gallery-wrapper {
+            position: relative;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #eee;
+            aspect-ratio: 1 / 1;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+        }
+
+        .gallery-item {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transition: transform 0.2s;
+        }
+
+        .gallery-wrapper:hover .gallery-item {
+            transform: scale(1.04);
+        }
+
+        .delete-gallery-form {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            margin: 0;
+        }
+
+        .delete-gallery-btn {
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(220, 53, 69, 0.95);
+            color: white;
+            font-size: 17px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            transition: transform 0.15s, background 0.15s;
+        }
+
+        .delete-gallery-btn:hover {
+            background: #b02a37;
+            transform: scale(1.08);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 5px;
+            color: #444;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select,
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        .save-btn {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .save-btn:hover {
+            background: #0052a3;
+        }
+
+        .upload-box {
+            background: #f8f9fa;
+            border: 2px dashed #ccc;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .no-images {
+            color: #888;
+            font-style: italic;
+            margin-top: 20px;
+        }
+
+        .flash {
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .flash-success {
+            background: #d1e7dd;
+            color: #0f5132;
+        }
+
+        .flash-error {
+            background: #f8d7da;
+            color: #842029;
+        }
+
+        .flash-info {
+            background: #cff4fc;
+            color: #055160;
+        }
+
+        @media (max-width: 900px) {
+
+            body {
+                padding: 20px;
+            }
+
+            .profile-layout {
+                flex-direction: column;
+            }
+
+            .info-card {
+                width: 100%;
+            }
+        }
+
+    @media(max-width:760px){.wrap{max-width:100%;padding-left:12px!important;padding-right:12px!important}.nav,.top{flex-wrap:wrap!important;padding-left:12px!important;padding-right:12px!important}.actions,.navlinks{width:100%;justify-content:space-between}.grid,.profile-layout,.body{grid-template-columns:1fr!important;flex-direction:column!important}.card,.section{width:100%!important}.search{flex-wrap:wrap}.search input{min-width:0}.conversation{min-width:0}.chat{max-width:100%!important}.message{max-width:88%!important}table{font-size:13px}}</style>
+
+</head>
+
+<body>
+
+<div class="container-wrapper">
+
+    <a href="/" class="back-nav">
+        ← Return to Dashboard
+    </a>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+
+        {% if messages %}
+
+            {% for category, message in messages %}
+
+                <div class="flash flash-{{ category }}">
+                    {{ message }}
+                </div>
+
+            {% endfor %}
+
+        {% endif %}
+
+    {% endwith %}
+
+
+    <div class="profile-layout">
+
+        <!-- PROFILE INFORMATION -->
+
+        <div class="info-card">
+
+            <img
+                src="{{ url_for(
+                    'static',
+                    filename='uploads/' + profile['photo']
+                ) }}"
+                class="profile-pic"
+                alt="Profile picture"
+            >
+
+            <h2 class="user-title">
+                {{ profile['name'] }}
+            </h2>
+
+            <p class="user-email">
+                {{ profile['gmail'] }}
+            </p>
+
+
+            <form
+                action="{{ url_for(
+                    'view_profile',
+                    user_id=profile['id']
+                ) }}"
+                method="POST"
+            >
+
+                <input
+                    type="hidden"
+                    name="form_type"
+                    value="personal_info"
+                >
+
+                <div class="form-row">
+
+                    <div>
+
+                        <label for="username">
+                            Username
+                        </label>
+
+                        <input
+                            type="text"
+                            id="username"
+                            name="username"
+                            value="{{ profile['username'] }}"
+                        >
+
+                    </div>
+
+
+                    <div>
+
+                        <label for="age">
+                            Age
+                        </label>
+
+                        <input
+                            type="number"
+                            id="age"
+                            name="age"
+                            value="{{ profile['age'] or '' }}"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-row">
+
+                    <div>
+
+                        <label for="nickname">
+                            Nickname
+                        </label>
+
+                        <input
+                            type="text"
+                            id="nickname"
+                            name="nickname"
+                            value="{{ profile['nickname'] }}"
+                        >
+
+                    </div>
+
+
+                    <div>
+
+                        <label for="partner">
+                            GF / BF Name
+                        </label>
+
+                        <input
+                            type="text"
+                            id="partner"
+                            name="partner"
+                            value="{{ profile['partner'] }}"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div style="margin-bottom: 15px;">
+
+                    <label for="relationship_status">
+                        Relationship Status
+                    </label>
+
+                    <select
+                        id="relationship_status"
+                        name="relationship_status"
+                    >
+
+                        <option
+                            value="Single"
+                            {% if profile['relationship_status'] == 'Single' %}
+                                selected
+                            {% endif %}
+                        >
+                            Single
+                        </option>
+
+                        <option
+                            value="In a Relationship"
+                            {% if profile['relationship_status'] == 'In a Relationship' %}
+                                selected
+                            {% endif %}
+                        >
+                            In a Relationship
+                        </option>
+
+                        <option
+                            value="Married"
+                            {% if profile['relationship_status'] == 'Married' %}
+                                selected
+                            {% endif %}
+                        >
+                            Married
+                        </option>
+
+                        <option
+                            value="It's Complicated"
+                            {% if profile['relationship_status'] == "It's Complicated" %}
+                                selected
+                            {% endif %}
+                        >
+                            It's Complicated
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                >
+                    Update Profile
+                </button>
+
+            </form>
+
+        </div>
+
+
+        <!-- LOGIN PASSWORD -->
+        <div class="gallery-card" style="margin-bottom:20px;">
+            <h3>Reset User Login Password</h3>
+            <p style="color:#666; font-size:13px;">This changes the password used at <strong>/user-login</strong>.</p>
+            <form action="{{ url_for('view_profile', user_id=profile['id']) }}" method="POST">
+                <input type="hidden" name="form_type" value="password_reset">
+                <div class="form-row">
+                    <div>
+                        <label for="new_password">New Password</label>
+                        <input type="password" id="new_password" name="new_password" minlength="6" required>
+                    </div>
+                    <div>
+                        <label for="confirm_password">Confirm Password</label>
+                        <input type="password" id="confirm_password" name="confirm_password" minlength="6" required>
+                    </div>
+                </div>
+                <button type="submit" class="save-btn">Set Login Password</button>
+            </form>
+        </div>
+
+        <!-- GALLERY -->
+
+        <div class="gallery-card">
+
+            <h3>
+                {{ profile['name'] }}'s Photo Gallery
+            </h3>
+
+
+            <form
+                action="{{ url_for(
+                    'view_profile',
+                    user_id=profile['id']
+                ) }}"
+                method="POST"
+                enctype="multipart/form-data"
+                class="upload-box"
+            >
+
+                <input
+                    type="hidden"
+                    name="form_type"
+                    value="gallery_upload"
+                >
+
+                <label>
+                    Add photos to this gallery
+                </label>
+
+                <input
+                    type="file"
+                    name="gallery_photos"
+                    accept="image/*"
+                    multiple
+                    required
+                    style="margin-bottom: 15px;"
+                >
+
+                <button
+                    type="submit"
+                    class="save-btn"
+                    style="background:#4CAF50; width:auto; padding:10px 30px;"
+                >
+                    Upload Photos
+                </button>
+
+            </form>
+
+
+            <div class="gallery-grid">
+
+                {% for item in gallery %}
+
+                    <div class="gallery-wrapper">
+
+                        <img
+                            src="{{ url_for(
+                                'static',
+                                filename='uploads/' + item['image_path']
+                            ) }}"
+                            class="gallery-item"
+                            alt="Gallery photo"
+                        >
+
+
+                        <form
+                            action="{{ url_for(
+                                'delete_gallery_image',
+                                image_id=item['id']
+                            ) }}"
+                            method="POST"
+                            class="delete-gallery-form"
+                            onsubmit="return confirm(
+                                'Delete this photo permanently?'
+                            );"
+                        >
+
+                            <button
+                                type="submit"
+                                class="delete-gallery-btn"
+                                title="Delete photo"
+                                aria-label="Delete photo"
+                            >
+                                ×
+                            </button>
+
+                        </form>
+
+                    </div>
+
+                {% else %}
+
+                    <p class="no-images">
+                        No photos have been uploaded yet.
+                    </p>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+</body>
+
+</html>

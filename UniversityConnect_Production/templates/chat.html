@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chat with {{ other_user['name'] }}</title>
+<style>
+body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;margin:0}
+.nav{background:white;padding:15px 25px;display:flex;justify-content:space-between}
+.nav a{color:#0066cc;text-decoration:none;font-weight:700;margin-left:15px}
+.wrap{max-width:800px;margin:25px auto;padding:0 15px}
+.header,.composer{background:white;padding:16px 20px;border-radius:14px}
+.header{display:flex;align-items:center;gap:14px}.avatar{width:52px;height:52px;border-radius:50%;object-fit:cover}
+.messages{background:white;margin:15px 0;padding:20px;border-radius:14px;min-height:400px;display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:70%;padding:10px 14px;border-radius:15px;line-height:1.4;white-space:pre-wrap}
+.mine{align-self:flex-end;background:#0066cc;color:white;border-bottom-right-radius:4px}
+.theirs{align-self:flex-start;background:#e9ecef;color:#222;border-bottom-left-radius:4px}
+.time{font-size:10px;opacity:.7;margin-top:4px}
+textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid #ccc;border-radius:10px;resize:vertical;min-height:60px}
+button{margin-top:10px;background:#0066cc;color:white;border:0;padding:11px 20px;border-radius:8px;font-weight:700;cursor:pointer}
+@media(max-width:760px){.wrap{max-width:100%;padding-left:12px!important;padding-right:12px!important}.nav,.top{flex-wrap:wrap!important;padding-left:12px!important;padding-right:12px!important}.actions,.navlinks{width:100%;justify-content:space-between}.grid,.profile-layout,.body{grid-template-columns:1fr!important;flex-direction:column!important}.card,.section{width:100%!important}.search{flex-wrap:wrap}.search input{min-width:0}.conversation{min-width:0}.chat{max-width:100%!important}.message{max-width:88%!important}table{font-size:13px}}</style>
+</head>
+<body>
+<div class="nav"><strong>💬 Private Chat</strong><div><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('user_home') }}">Home</a><a href="{{ url_for('user_logout') }}">Log Out</a></div></div>
+<div class="wrap">
+<div class="header"><img class="avatar" src="{{ url_for('static', filename='uploads/' + other_user['photo']) }}" alt="">
+<div><h2 style="margin:0">{{ other_user['name'] }}</h2>{% if other_user['username'] %}<div>@{{ other_user['username'] }}</div>{% endif %}</div></div>
+<div class="messages">
+{% for m in chat_messages %}
+<div class="bubble {% if m['sender_id'] == current_user['id'] %}mine{% else %}theirs{% endif %}">{{ m['message'] }}<div class="time">{{ m['created_at'] }}</div></div>
+{% else %}<div style="text-align:center;color:#888;margin:auto">No messages yet. Say hello!</div>{% endfor %}
+</div>
+<div class="composer">
+<form action="{{ url_for('send_message') }}" method="POST">
+<input type="hidden" name="receiver_id" value="{{ other_user['id'] }}">
+<textarea name="message" maxlength="5000" placeholder="Write a message..." required autofocus></textarea>
+<button type="submit">Send Message</button>
+</form>
+</div>
+</div>
+</body>
+</html>
