@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Messages</title>
+<style>
+body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;margin:0}
+.nav{background:white;padding:15px 25px;display:flex;justify-content:space-between;align-items:center}
+.nav a{color:#0066cc;text-decoration:none;font-weight:700;margin-left:15px}
+.wrap{max-width:900px;margin:30px auto;padding:0 20px}
+.panel{background:white;border-radius:15px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,.07)}
+.item{display:flex;align-items:center;gap:15px;padding:16px 20px;border-bottom:1px solid #eee;text-decoration:none;color:#222}
+.item:hover{background:#f8f9fa}.avatar{width:52px;height:52px;border-radius:50%;object-fit:cover}
+.info{flex:1}.time{font-size:12px;color:#888}.unread{background:#0066cc;color:white;border-radius:12px;padding:3px 8px;font-size:12px}
+.new{background:white;margin-top:20px;padding:20px;border-radius:15px}
+select,button{padding:11px;border-radius:8px;border:1px solid #ccc}select{width:70%}
+button{background:#0066cc;color:white;border:0;font-weight:700}
+@media(max-width:760px){.wrap{max-width:100%;padding-left:12px!important;padding-right:12px!important}.nav,.top{flex-wrap:wrap!important;padding-left:12px!important;padding-right:12px!important}.actions,.navlinks{width:100%;justify-content:space-between}.grid,.profile-layout,.body{grid-template-columns:1fr!important;flex-direction:column!important}.card,.section{width:100%!important}.search{flex-wrap:wrap}.search input{min-width:0}.conversation{min-width:0}.chat{max-width:100%!important}.message{max-width:88%!important}table{font-size:13px}}</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}"><script src="{{ url_for('static', filename='theme.js') }}"></script></head>
+<body>{% include 'return_nav.html' %}
+<div class="nav"><strong>💬 Messages</strong><div><a href="{{ url_for('user_home') }}">Home</a><a href="{{ url_for('user_logout') }}">Log Out</a></div></div>
+<div class="wrap">
+<h2>Conversations</h2>
+<div class="panel">
+{% for c in conversations %}
+<a class="item" href="{{ url_for('chat', user_id=c['id']) }}">
+<img class="avatar" src="{{ url_for('static', filename='uploads/' + c['photo']) }}" alt="">
+<div class="info"><strong>{{ c['name'] }}</strong>
+{% if c['last_message'] %}<div>{{ c['last_message']|truncate(80) }}</div>{% else %}<div>Start a conversation</div>{% endif %}
+{% if c['last_message_at'] %}<div class="time">{{ c['last_message_at'] }}</div>{% endif %}</div>
+{% if c['unread_count'] %}<span class="unread">{{ c['unread_count'] }}</span>{% endif %}
+</a>
+{% else %}<div style="padding:25px;color:#777">No conversations yet.</div>{% endfor %}
+</div>
+<div class="new">
+<h3>Start a new conversation</h3>
+<form id="newChatForm">
+<select id="person" required><option value="">Choose a person...</option>
+{% for user in users %}<option value="{{ user['id'] }}">{{ user['name'] }}{% if user['username'] %} (@{{ user['username'] }}){% endif %}</option>{% endfor %}
+</select>
+<button type="submit">Open Chat</button>
+</form>
+</div>
+</div>
+<script>
+document.getElementById('newChatForm').addEventListener('submit', function(e){
+e.preventDefault();
+const id=document.getElementById('person').value;
+if(id) window.location.href='/messages/'+id;
+});
+</script>
+{% include 'mobile_nav.html' %}<button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button></body>
+</html>

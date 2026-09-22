@@ -1,0 +1,61 @@
+<style>
+.mobile-bottom-nav{display:none}
+.mobile-more-sheet{display:none}
+@media (max-width:760px){
+  body{padding-bottom:76px!important}
+  .mobile-bottom-nav{
+    display:flex;position:fixed;left:0;right:0;bottom:0;height:64px;
+    background:rgba(255,255,255,.98);border-top:1px solid #dfe4ea;
+    box-shadow:0 -6px 20px rgba(15,23,42,.10);z-index:9999;
+    align-items:stretch;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom);
+    backdrop-filter:blur(12px)
+  }
+  .mobile-bottom-nav a,.mobile-bottom-nav button{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;background:none!important;border:0!important;color:#475467!important;
+    text-decoration:none;font:700 11px/1.1 Arial,sans-serif;padding:5px 2px!important;
+    margin:0!important;min-width:0;cursor:pointer
+  }
+  .mobile-bottom-nav a.active,.mobile-bottom-nav button.active{color:#1456c4!important}
+  .mobile-icon{font-size:20px;line-height:1}
+  .mobile-badge{display:inline-flex;min-width:16px;height:16px;padding:0 4px;border-radius:99px;
+    background:#dc3545;color:#fff;font:800 10px/16px Arial,sans-serif;position:absolute;margin:-28px 0 0 22px}
+  .mobile-more-sheet{
+    position:fixed;left:12px;right:12px;bottom:76px;z-index:9998;background:#fff;
+    border:1px solid #dfe4ea;border-radius:16px;box-shadow:0 12px 40px rgba(15,23,42,.20);
+    padding:10px;display:none
+  }
+  .mobile-more-sheet.open{display:block}
+  .mobile-more-sheet a{display:block;padding:13px 12px;border-radius:10px;color:#172033;
+    text-decoration:none;font-weight:700}
+  .mobile-more-sheet a:hover{background:#f3f6fa}
+  .mobile-more-backdrop{display:none;position:fixed;inset:0;background:rgba(15,23,42,.20);z-index:9997}
+  .mobile-more-backdrop.open{display:block}
+}
+</style>
+<div class="mobile-more-backdrop" id="mobileMoreBackdrop" onclick="toggleMobileMore(false)"></div>
+<div class="mobile-more-sheet" id="mobileMoreSheet">
+  <a href="{{ url_for('campus_services') }}">🏫 Campus Services</a>
+  <a href="{{ url_for('groups_page') }}">👥 Groups</a>
+  <a href="{{ url_for('my_profile') }}">👤 Profile / CV</a>
+  <a href="{{ url_for('profile_settings') }}">⚙️ Profile & Study Settings</a>
+  <a href="{{ url_for('appearance_settings') }}">🎨 Appearance</a>
+  <a href="{{ url_for('user_home') }}#people">🔎 Find Students</a>
+  <a href="{{ url_for('user_logout') }}">↪ Log Out</a>
+</div>
+<nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+  <a class="{% if request.endpoint == 'user_home' %}active{% endif %}" href="{{ url_for('user_home') }}"><span class="mobile-icon">🏠</span><span>Home</span></a>
+  <a class="{% if request.endpoint in ['messages','chat'] %}active{% endif %}" href="{{ url_for('messages') }}" style="position:relative"><span class="mobile-icon">💬</span>{% if unread_count|default(0) %}<span class="mobile-badge">{{ unread_count }}</span>{% endif %}<span>Messages{% if unread_count|default(0) %} · {{ unread_count }}{% endif %}</span></a>
+  <a href="{{ url_for('user_home') }}#newsfeed"><span class="mobile-icon">📰</span><span>Newsfeed</span></a>
+  <button type="button" onclick="toggleMobileMore()" aria-label="More navigation"><span class="mobile-icon">⋮</span><span>More</span></button>
+</nav>
+<script>
+function toggleMobileMore(force){
+  const sheet=document.getElementById('mobileMoreSheet');
+  const backdrop=document.getElementById('mobileMoreBackdrop');
+  if(!sheet||!backdrop)return;
+  const open=typeof force==='boolean'?force:!sheet.classList.contains('open');
+  sheet.classList.toggle('open',open);backdrop.classList.toggle('open',open);
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleMobileMore(false)});
+</script>
