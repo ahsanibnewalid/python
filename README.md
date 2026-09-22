@@ -31,7 +31,7 @@ A Flask-based university community platform with student profiles, social feed, 
 
 ## Important production gaps
 
-This is a commercial MVP foundation, not yet a finished SaaS billing platform. Payment processing, automated custom-domain DNS/SSL, strict per-tenant authorization across every route, PostgreSQL, object storage, WebSockets and production observability still need implementation before selling to institutions at scale.
+This is a commercial MVP foundation, not yet a finished SaaS billing platform. Payment processing, automated custom-domain DNS/SSL, strict per-tenant authorization across every route, object storage, WebSockets and production observability still need implementation before selling to institutions at scale. PostgreSQL persistence is now supported through `DATABASE_URL`; local development can continue using SQLite.
 
 ## Run locally
 
@@ -68,3 +68,16 @@ The public domain opens the user portal first. The admin dashboard is protected 
 4. After successful login you are redirected to `/admin`.
 
 For a fresh local installation, run `python setup_local.py` once and choose the admin password. Do not use the development fallback password in a real deployment.
+
+## Production database (Render)
+
+The app uses SQLite when `DATABASE_URL` is empty and PostgreSQL when `DATABASE_URL` is set. For Render, create a PostgreSQL database and add its **Internal Database URL** to the web service as `DATABASE_URL`. Do not commit `database.db` or database credentials to GitHub.
+
+The chat system stores `is_read`, `delivered_at` and `read_at` so the sender can see `✓`, `✓✓` and `✓✓ Seen` while the chat page polls for updates.
+
+For a live Render deployment, the database is the persistent source of truth; the web service filesystem should not be used as the permanent database.
+
+
+## Messenger optimization update
+- Voice calling and video calling/WebRTC functionality has been removed from the chat UI and backend to reduce browser/device overhead.
+- Private messaging, E2EE key handling, chat themes/wallpapers, disappearing messages, safety number, encrypted backup/restore, block/unblock, reporting, and profile access remain.

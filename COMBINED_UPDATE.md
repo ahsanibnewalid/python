@@ -40,3 +40,8 @@ The application still uses SQLite/local media in this build. For production scal
 - All 22 HTML templates parsed successfully with Jinja2.
 - All `url_for()` references found in templates map to existing Flask endpoints.
 - Full pytest execution could not run in the build environment because the environment does not have the project's Flask/Werkzeug dependencies installed; the package's requirements files are included for installation.
+
+
+## Messenger optimization update
+- Voice calling and video calling/WebRTC functionality has been removed from the chat UI and backend to reduce browser/device overhead.
+- Private messaging, E2EE key handling, chat themes/wallpapers, disappearing messages, safety number, encrypted backup/restore, block/unblock, reporting, and profile access remain.

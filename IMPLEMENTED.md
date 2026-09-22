@@ -73,3 +73,8 @@ This build adds real application workflows rather than only database foundations
 - Custom-domain DNS/SSL provisioning is configuration-only; deployment automation is still required.
 - Fine-grained permission enforcement needs to be applied to every university/depart­ment/moderator action before multi-tenant production use.
 - PostgreSQL/object storage/WebSocket infrastructure should replace SQLite/local polling for production scale.
+
+
+## Messenger optimization update
+- Voice calling and video calling/WebRTC functionality has been removed from the chat UI and backend to reduce browser/device overhead.
+- Private messaging, E2EE key handling, chat themes/wallpapers, disappearing messages, safety number, encrypted backup/restore, block/unblock, reporting, and profile access remain.
