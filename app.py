@@ -85,7 +85,7 @@ app.config["SESSION_COOKIE_REFRESH_EACH_REQUEST"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
 REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
 
-DB_FILE = "database.db"
+DB_FILE = os.environ.get("DB_FILE", "database.db")
 PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join("private_media", "posts"))
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -400,10 +400,65 @@ def init_db():
             theme TEXT NOT NULL DEFAULT 'default',
             wallpaper TEXT NOT NULL DEFAULT 'none',
             disappearing_seconds INTEGER NOT NULL DEFAULT 0,
+            e2ee_enabled INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, peer_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (peer_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Idempotent migration for databases created by older builds.  Some
+    # existing SQLite databases already contain e2ee_enabled even when the
+    # schema-introspection result is stale/inconsistent (for example after a
+    # previous interrupted migration).  SQLite raises OperationalError for a
+    # duplicate column, so tolerate only that specific migration race/state.
+    chat_pref_columns = {
+        str(row["name"]).lower()
+        for row in conn.execute("PRAGMA table_info(chat_preferences)").fetchall()
+    }
+    if "e2ee_enabled" not in chat_pref_columns:
+        try:
+            conn.execute(
+                "ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            privacy TEXT NOT NULL DEFAULT 'open',
+            created_by INTEGER NOT NULL,
+            source_group_id INTEGER DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_group_id) REFERENCES groups(id) ON DELETE SET NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_group_members (
+            chat_group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (chat_group_id,user_id),
+            FOREIGN KEY (chat_group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_group_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_group_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (chat_group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
 
@@ -882,6 +937,51 @@ def validate_image_signature(file_storage):
     return False
 
 
+def validate_media_signature(file_storage, media_type):
+    """Validate a small set of common image/video container signatures."""
+    try:
+        pos = file_storage.stream.tell()
+        header = file_storage.stream.read(32)
+        file_storage.stream.seek(pos)
+    except Exception:
+        return False
+    if media_type == "image":
+        return validate_image_signature(file_storage)
+    # MP4/MOV/M4V use an ISO BMFF ftyp box; WEBM starts with EBML.
+    if header.startswith(b"\x1a\x45\xdf\xa3"):
+        return True
+    return len(header) >= 12 and header[4:8] == b"ftyp"
+
+
+def remove_private_media(token, original_name):
+    if not token or not original_name:
+        return
+    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+    if not re.fullmatch(r"[a-z0-9]{1,8}", ext):
+        return
+    try:
+        os.remove(os.path.join(PRIVATE_MEDIA_FOLDER, f"{token}.{ext}"))
+    except OSError:
+        pass
+
+
+def cleanup_expired_stories(conn):
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    expired = conn.execute("SELECT media_token, original_name FROM stories WHERE expires_at <= ?", (now,)).fetchall()
+    for row in expired:
+        remove_private_media(row["media_token"], row["original_name"])
+    if expired:
+        conn.execute("DELETE FROM stories WHERE expires_at <= ?", (now,))
+    return len(expired)
+
+
+def same_university_clause(current_user_row, target_alias="u"):
+    """Return an optional SQL restriction for legacy rows without university_id."""
+    if not current_user_row or not current_user_row["university_id"]:
+        return "", []
+    return f" AND ({target_alias}.university_id IS NULL OR {target_alias}.university_id = ?)", [current_user_row["university_id"]]
+
+
 def generate_unique_filename(original_filename, prefix="file"):
     """
     Prevent two uploaded files with the same original name
@@ -1199,26 +1299,23 @@ def user_home():
         return redirect(url_for("user_login"))
 
     # People section: searchable so users do not need a separate page.
+    uni_clause, uni_params = same_university_clause(current_user, "users")
     if search:
         users = conn.execute(
-            """
+            f"""
             SELECT id, name, gmail, photo, username, nickname, relationship_status
             FROM users
-            WHERE id != ?
+            WHERE id != ? {uni_clause}
               AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
             ORDER BY name COLLATE NOCASE
             """,
-            (user_id, f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%")
+            (user_id, *uni_params, f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%")
         ).fetchall()
     else:
         users = conn.execute(
-            """
-            SELECT id, name, gmail, photo, username, nickname, relationship_status
-            FROM users
-            WHERE id != ?
-            ORDER BY name COLLATE NOCASE
-            """,
-            (user_id,)
+            f"""SELECT id, name, gmail, photo, username, nickname, relationship_status
+            FROM users WHERE id != ? {uni_clause} ORDER BY name COLLATE NOCASE""",
+            (user_id, *uni_params)
         ).fetchall()
 
     unread_count = conn.execute(
@@ -1230,8 +1327,8 @@ def user_home():
     ).fetchone()[0]
 
     total_members = conn.execute(
-        "SELECT COUNT(*) FROM users WHERE id != ?",
-        (user_id,)
+        f"SELECT COUNT(*) FROM users WHERE id != ? {uni_clause}",
+        (user_id, *uni_params)
     ).fetchone()[0]
 
     conversation_count = conn.execute(
@@ -1307,17 +1404,20 @@ def feed():
 
 
 def fetch_feed(conn, user_id, offset=0, limit=8):
+    current = conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
+    uni_clause, uni_params = same_university_clause(current, "u")
     return conn.execute(
-        """
+        f"""
         SELECT p.*, u.name, u.username, u.photo,
                (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS like_count,
                (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) AS comment_count,
                EXISTS(SELECT 1 FROM post_likes me WHERE me.post_id=p.id AND me.user_id=?) AS liked_by_me
         FROM posts p
         JOIN users u ON u.id=p.user_id
+        WHERE 1=1 {uni_clause}
         ORDER BY p.id DESC
         LIMIT ? OFFSET ?
-        """, (user_id, limit, offset)
+        """, (user_id, *uni_params, limit, offset)
     ).fetchall()
 
 
@@ -1394,6 +1494,10 @@ def create_story():
         if wants_json: return jsonify({"error": message}), 400
         flash(message, "error"); return redirect(url_for("user_home"))
     media_type="video" if ext in POST_VIDEO_EXTENSIONS else "image"
+    if not validate_media_signature(media, media_type):
+        message="The uploaded file does not match its declared media type."
+        if wants_json: return jsonify({"error": message}), 400
+        flash(message, "error"); return redirect(url_for("user_home"))
     token=secrets.token_urlsafe(36)
     path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
     try:
@@ -1419,15 +1523,57 @@ def create_story():
     return redirect(url_for("user_home"))
 
 
+@app.route("/stories/<int:story_id>/delete", methods=["POST"])
+def delete_story(story_id):
+    """Delete a currently active story owned by the logged-in user."""
+    wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", "")
+    if not user_required():
+        return (jsonify({"error": "login_required"}), 401) if wants_json else redirect(url_for("user_login"))
+    require_csrf()
+    uid = int(session["user_id"])
+    conn = get_db_connection()
+    story = conn.execute(
+        "SELECT id, media_token, original_name FROM stories WHERE id=? AND user_id=?",
+        (story_id, uid),
+    ).fetchone()
+    if not story:
+        conn.close()
+        if wants_json:
+            return jsonify({"error": "Story not found or you are not the owner."}), 404
+        flash("Story not found or you are not allowed to delete it.", "error")
+        return redirect(url_for("user_home"))
+    try:
+        remove_private_media(story["media_token"], story["original_name"])
+        conn.execute("DELETE FROM stories WHERE id=? AND user_id=?", (story_id, uid))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        app.logger.exception("Story deletion failed")
+        if wants_json:
+            return jsonify({"error": "The story could not be deleted."}), 500
+        flash("The story could not be deleted.", "error")
+        return redirect(url_for("user_home"))
+    conn.close()
+    if wants_json:
+        return jsonify({"ok": True, "story_id": story_id})
+    flash("Story deleted.", "success")
+    return redirect(url_for("user_home"))
+
+
 def fetch_stories(conn, user_id):
+    cleanup_expired_stories(conn)
+    current = conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
+    uni_clause, uni_params = same_university_clause(current, "u")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     return conn.execute(
-        """SELECT s.*, u.name, u.username, u.photo,
+        f"""SELECT s.*, u.name, u.username, u.photo,
                   CASE WHEN s.user_id=? THEN 1 ELSE 0 END AS is_mine
            FROM stories s JOIN users u ON u.id=s.user_id
-           WHERE s.expires_at > ?
+           WHERE s.expires_at > ? {uni_clause}
            ORDER BY is_mine DESC, s.id DESC
            LIMIT 30""",
-        (user_id, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+        (user_id, now, *uni_params)
     ).fetchall()
 
 
@@ -1445,12 +1591,14 @@ def serialize_stories(conn, stories):
 def private_story_media(token):
     if not user_required(): abort(401)
     conn=get_db_connection()
-    story=conn.execute("SELECT * FROM stories WHERE media_token=?", (token,)).fetchone()
+    story=conn.execute("SELECT s.*, u.university_id FROM stories s JOIN users u ON u.id=s.user_id WHERE s.media_token=?", (token,)).fetchone()
+    viewer=conn.execute("SELECT university_id FROM users WHERE id=?", (session["user_id"],)).fetchone()
     conn.close()
     if not story: abort(404)
-    if story["expires_at"] <= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"):
-        abort(404)
+    if story["expires_at"] <= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"): abort(404)
+    if story["university_id"] and viewer and viewer["university_id"] and int(story["university_id"]) != int(viewer["university_id"]): abort(403)
     ext=story["original_name"].rsplit(".",1)[-1].lower() if "." in story["original_name"] else ""
+    if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
     path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
     if not os.path.isfile(path): abort(404)
     return send_file(path, conditional=True, max_age=0)
@@ -1475,27 +1623,50 @@ def create_post():
     if not caption and not has_media:
         flash("Write something or choose a photo/video before publishing.", "error")
         return redirect(url_for("user_home")+"#newsfeed")
+    if mode not in {"post", "reel"}:
+        mode="post"
     conn=get_db_connection()
     token=secrets.token_urlsafe(36)
     original=""
-    media_type="image"  # legacy schema requires image/video; original_name empty marks a text-only post.
-    if has_media:
-        original=secure_filename(media.filename)
-        ext=original.rsplit(".",1)[-1].lower() if "." in original else ""
-        allowed=POST_VIDEO_EXTENSIONS if mode == "reel" else (POST_IMAGE_EXTENSIONS|POST_VIDEO_EXTENSIONS)
-        if ext not in allowed:
-            conn.close(); flash("Unsupported media format.", "error"); return redirect(url_for("user_home")+"#newsfeed")
-        media_type="video" if ext in POST_VIDEO_EXTENSIONS else "image"
-        if mode == "reel" and media_type != "video":
-            conn.close(); flash("A Reel must be a video.", "error"); return redirect(url_for("user_home")+"#newsfeed")
-        token=secrets.token_urlsafe(36)
-        media.save(os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext))
-    elif mode == "reel":
-        conn.close(); flash("Choose a video for your Reel.", "error"); return redirect(url_for("user_home")+"#newsfeed")
-    post_type = "reel" if mode == "reel" else "post"
-    conn.execute("INSERT INTO posts(user_id,caption,media_token,media_type,original_name,post_type,created_at) VALUES(?,?,?,?,?,?,?)",
-                 (session["user_id"], caption, token, media_type, original, post_type, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit(); conn.close()
+    media_type="image"
+    saved_path=None
+    try:
+        if has_media:
+            original=secure_filename(media.filename)
+            ext=original.rsplit(".",1)[-1].lower() if "." in original else ""
+            allowed=POST_VIDEO_EXTENSIONS if mode == "reel" else (POST_IMAGE_EXTENSIONS|POST_VIDEO_EXTENSIONS)
+            if ext not in allowed:
+                raise ValueError("Unsupported media format.")
+            media_type="video" if ext in POST_VIDEO_EXTENSIONS else "image"
+            if mode == "reel" and media_type != "video":
+                raise ValueError("A Reel must be a video.")
+            if not validate_media_signature(media, media_type):
+                raise ValueError("The uploaded file does not match its declared media type.")
+            saved_path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
+            media.save(saved_path)
+        elif mode == "reel":
+            raise ValueError("Choose a video for your Reel.")
+        post_type = "reel" if mode == "reel" else "post"
+        cursor=conn.execute("INSERT INTO posts(user_id,caption,media_token,media_type,original_name,post_type,created_at) VALUES(?,?,?,?,?,?,?)",
+                     (session["user_id"], caption, token, media_type, original, post_type, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+        post_id=cursor.lastrowid
+        conn.commit()
+    except ValueError as exc:
+        conn.rollback(); conn.close()
+        if saved_path:
+            try: os.remove(saved_path)
+            except OSError: pass
+        flash(str(exc), "error")
+        return redirect(url_for("user_home")+"#newsfeed")
+    except Exception:
+        conn.rollback(); conn.close()
+        if saved_path:
+            try: os.remove(saved_path)
+            except OSError: pass
+        app.logger.exception("Post creation failed")
+        flash("The post could not be published. Please try again.", "error")
+        return redirect(url_for("user_home")+"#newsfeed")
+    conn.close()
     flash("Reel published." if mode == "reel" else "Post published to the student newsfeed.", "success")
     return redirect(url_for("user_home")+"#newsfeed")
 
@@ -1505,6 +1676,10 @@ def toggle_post_like(post_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf()
     conn=get_db_connection(); uid=session["user_id"]
+    post=conn.execute("SELECT p.id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
+    viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not post: conn.close(); return jsonify({"error":"Post not found"}),404
+    if post["university_id"] and viewer and viewer["university_id"] and int(post["university_id"]) != int(viewer["university_id"]): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
     exists=conn.execute("SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)).fetchone()
     if exists: conn.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)); liked=False
     else: conn.execute("INSERT INTO post_likes(post_id,user_id,created_at) VALUES(?,?,?)",(post_id,uid,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))); liked=True
@@ -1518,12 +1693,29 @@ def add_post_comment(post_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf(); comment=request.form.get("comment","").strip()
     if not comment or len(comment)>1000: return jsonify({"error":"Invalid comment"}),400
-    conn=get_db_connection(); exists=conn.execute("SELECT 1 FROM posts WHERE id=?",(post_id,)).fetchone()
+    conn=get_db_connection(); uid=session["user_id"]
+    exists=conn.execute("SELECT p.id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
+    viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
     if not exists: conn.close(); return jsonify({"error":"Post not found"}),404
-    conn.execute("INSERT INTO post_comments(post_id,user_id,comment,created_at) VALUES(?,?,?,?)",(post_id,session["user_id"],comment,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+    if exists["university_id"] and viewer and viewer["university_id"] and int(exists["university_id"]) != int(viewer["university_id"]): conn.close(); return jsonify({"error":"You cannot comment on this post."}),403
+    conn.execute("INSERT INTO post_comments(post_id,user_id,comment,created_at) VALUES(?,?,?,?)",(post_id,uid,comment,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
     count=conn.execute("SELECT COUNT(*) FROM post_comments WHERE post_id=?",(post_id,)).fetchone()[0]
     conn.commit(); conn.close()
     return jsonify({"comment_count":count})
+
+
+@app.route("/post/<int:post_id>/edit", methods=["POST"])
+def edit_post(post_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]
+    caption=request.form.get("caption","").strip()[:2000]
+    conn=get_db_connection(); post=conn.execute("SELECT * FROM posts WHERE id=?",(post_id,)).fetchone()
+    if not post: conn.close(); return jsonify({"error":"Post not found."}),404
+    if int(post["user_id"]) != int(uid): conn.close(); return jsonify({"error":"You can only edit your own posts."}),403
+    if not caption and not post["original_name"]:
+        conn.close(); return jsonify({"error":"A text post cannot be empty."}),400
+    conn.execute("UPDATE posts SET caption=? WHERE id=?",(caption,post_id)); conn.commit(); conn.close()
+    return jsonify({"ok":True,"post_id":post_id,"caption":caption})
 
 
 @app.route("/post/<int:post_id>/delete", methods=["POST"])
@@ -1542,20 +1734,23 @@ def delete_post(post_id):
     conn.execute("DELETE FROM post_comments WHERE post_id=?", (post_id,))
     conn.execute("DELETE FROM posts WHERE id=?", (post_id,))
     conn.commit(); conn.close()
-    if post["original_name"]:
-        ext=post["original_name"].rsplit(".",1)[-1].lower() if "." in post["original_name"] else ""
-        path=os.path.join(PRIVATE_MEDIA_FOLDER, post["media_token"]+"."+ext)
-        try: os.remove(path)
-        except OSError: pass
+    remove_private_media(post["media_token"], post["original_name"])
     return jsonify({"ok":True,"post_id":post_id})
 
 
 @app.route("/private-post-media/<token>")
 def private_post_media(token):
     if not user_required(): abort(401)
-    conn=get_db_connection(); post=conn.execute("SELECT * FROM posts WHERE media_token=?",(token,)).fetchone(); conn.close()
+    conn=get_db_connection()
+    post=conn.execute("SELECT p.*, u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.media_token=?",(token,)).fetchone()
+    viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(session["user_id"],)).fetchone()
+    conn.close()
     if not post: abort(404)
-    path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+post["original_name"].rsplit(".",1)[-1].lower())
+    if post["university_id"] and viewer and viewer["university_id"] and int(post["university_id"]) != int(viewer["university_id"]): abort(403)
+    if not post["original_name"]: abort(404)
+    ext=post["original_name"].rsplit(".",1)[-1].lower() if "." in post["original_name"] else ""
+    if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
+    path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
     if not os.path.isfile(path): abort(404)
     return send_file(path, conditional=True, max_age=0)
 
@@ -1615,8 +1810,18 @@ def update_cover_photo():
     filename=generate_unique_filename(media.filename, prefix="cover")
     path=os.path.join(app.config["UPLOAD_FOLDER"], filename); media.save(path)
     conn=get_db_connection(); old=conn.execute("SELECT cover_photo FROM users WHERE id=?",(uid,)).fetchone()
-    conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(filename,uid)); create_media_update_post(conn, uid, path, "updated their cover photo.")
-    conn.commit(); conn.close()
+    try:
+        conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(filename,uid))
+        create_media_update_post(conn, uid, path, "updated their cover photo.")
+        conn.commit()
+    except Exception:
+        conn.rollback(); conn.close()
+        try: os.remove(path)
+        except OSError: pass
+        app.logger.exception("Cover photo update failed")
+        flash("The cover photo could not be updated. Please try again.","error")
+        return redirect(url_for("my_profile"))
+    conn.close()
     if old and old["cover_photo"] and old["cover_photo"] != filename:
         try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"], old["cover_photo"]))
         except OSError: pass
@@ -1720,24 +1925,34 @@ def profile_settings():
                     filename = new_filename
                     profile_photo_changed = True
 
-            conn.execute(
-                """
-                UPDATE users SET
-                    name=?, gmail=?, username=?, photo=?, nickname=?, age=?,
-                    relationship_status=?, partner=?, phone=?, location=?, birth_date=?,
-                    headline=?, occupation=?, company=?, website=?, bio=?, education=?,
-                    skills=?, experience=?, achievements=?, interests=?, projects=?, certifications=?, references_text=?, career_objective=?,
-                    study_status=?, department=?, academic_year=?, semester=?, student_id=?, university=?, profile_view=?
-                WHERE id=?
-                """,
-                (name, gmail, username, filename, nickname, age or None,
-                 relationship_status or "Single", partner, phone, location, birth_date,
-                 headline, occupation, company, website, bio, education, skills,
-                 experience, achievements, interests, projects, certifications, references_text, career_objective, study_status, department, academic_year, semester, student_id, university, profile_view, user_id)
-            )
-            if profile_photo_changed and profile_photo_path:
-                create_media_update_post(conn, user_id, profile_photo_path, "updated their profile photo.")
-            conn.commit()
+            try:
+                conn.execute(
+                    """
+                    UPDATE users SET
+                        name=?, gmail=?, username=?, photo=?, nickname=?, age=?,
+                        relationship_status=?, partner=?, phone=?, location=?, birth_date=?,
+                        headline=?, occupation=?, company=?, website=?, bio=?, education=?,
+                        skills=?, experience=?, achievements=?, interests=?, projects=?, certifications=?, references_text=?, career_objective=?,
+                        study_status=?, department=?, academic_year=?, semester=?, student_id=?, university=?, profile_view=?
+                    WHERE id=?
+                    """,
+                    (name, gmail, username, filename, nickname, age or None,
+                     relationship_status or "Single", partner, phone, location, birth_date,
+                     headline, occupation, company, website, bio, education, skills,
+                     experience, achievements, interests, projects, certifications, references_text, career_objective, study_status, department, academic_year, semester, student_id, university, profile_view, user_id)
+                )
+                if profile_photo_changed and profile_photo_path:
+                    create_media_update_post(conn, user_id, profile_photo_path, "updated their profile photo.")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                if profile_photo_changed and profile_photo_path:
+                    try: os.remove(profile_photo_path)
+                    except OSError: pass
+                app.logger.exception("Profile update failed")
+                flash("Your profile could not be saved. Please try again.", "error")
+                conn.close()
+                return redirect(url_for("profile_settings"))
             # Remove previous profile image only after the historical post has its own copy.
             if profile_photo_changed and profile["photo"] and profile["photo"] != "default_profile.png":
                 try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"], profile["photo"]))
@@ -1813,19 +2028,30 @@ def chat_preferences(user_id):
     if not user_required(): return jsonify({'error':'login_required'}),401
     if user_id==session['user_id']: return jsonify({'error':'invalid_peer'}),400
     conn=get_db_connection(); now=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if not conn.execute('SELECT id FROM users WHERE id=?',(user_id,)).fetchone():
+        conn.close(); return jsonify({'error':'user_not_found'}),404
     if request.method=='POST':
         require_csrf(); data=request.get_json(silent=True) or {}
         theme=data.get('theme','default'); wallpaper=data.get('wallpaper','none')
         try: disappear=max(0,min(int(data.get('disappearing_seconds',0)),604800))
         except Exception: disappear=0
+        e2ee=1 if bool(data.get('e2ee_enabled',False)) else 0
         if theme not in {'default','dark','light','midnight','forest'}: theme='default'
         if wallpaper not in {'none','dots','gradient','paper','night'}: wallpaper='none'
+        if e2ee:
+            own_key=get_public_key(conn,session['user_id'])
+            if not own_key:
+                conn.close(); return jsonify({'error':'Your browser has not created a secure key yet. Turn on E2EE again to initialize it.','requires_keys':True}),409
         row=conn.execute('SELECT user_id FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone()
-        if row: conn.execute('UPDATE chat_preferences SET theme=?,wallpaper=?,disappearing_seconds=?,updated_at=? WHERE user_id=? AND peer_id=?',(theme,wallpaper,disappear,now,session['user_id'],user_id))
-        else: conn.execute('INSERT INTO chat_preferences(user_id,peer_id,theme,wallpaper,disappearing_seconds,updated_at) VALUES(?,?,?,?,?,?)',(session['user_id'],user_id,theme,wallpaper,disappear,now))
-        conn.commit(); conn.close(); return jsonify({'ok':True,'theme':theme,'wallpaper':wallpaper,'disappearing_seconds':disappear})
-    row=conn.execute('SELECT theme,wallpaper,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone(); conn.close()
-    return jsonify(dict(row) if row else {'theme':'default','wallpaper':'none','disappearing_seconds':0})
+        if row:
+            conn.execute('UPDATE chat_preferences SET theme=?,wallpaper=?,disappearing_seconds=?,e2ee_enabled=?,updated_at=? WHERE user_id=? AND peer_id=?',(theme,wallpaper,disappear,e2ee,now,session['user_id'],user_id))
+        else:
+            conn.execute('INSERT INTO chat_preferences(user_id,peer_id,theme,wallpaper,disappearing_seconds,e2ee_enabled,updated_at) VALUES(?,?,?,?,?,?,?)',(session['user_id'],user_id,theme,wallpaper,disappear,e2ee,now))
+        conn.commit(); conn.close(); return jsonify({'ok':True,'theme':theme,'wallpaper':wallpaper,'disappearing_seconds':disappear,'e2ee_enabled':bool(e2ee)})
+    row=conn.execute('SELECT theme,wallpaper,disappearing_seconds,e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone()
+    peer_pref=conn.execute('SELECT e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(user_id,session['user_id'])).fetchone()
+    conn.close()
+    return jsonify(dict(row) if row else {'theme':'default','wallpaper':'none','disappearing_seconds':0,'e2ee_enabled':False,'peer_e2ee_enabled':bool(peer_pref and peer_pref['e2ee_enabled'])})
 
 @app.route('/api/e2ee/safety-number/<int:user_id>')
 def safety_number(user_id):
@@ -1842,22 +2068,21 @@ def register_device():
     if not user_required(): return jsonify({'error':'login_required'}),401
     require_csrf(); data=request.get_json(silent=True) or {}; uid=session['user_id']
     device_id=str(data.get('device_id','')).strip(); identity=str(data.get('identity_public_key','')).strip()
-    if not device_id or len(device_id)>128 or len(identity)<40: return jsonify({'error':'invalid_device'}),400
+    if not re.fullmatch(r'[A-Za-z0-9._:-]{8,128}', device_id) or len(identity)<40 or len(identity)>5000:
+        return jsonify({'error':'invalid_device'}),400
     now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'); conn=get_db_connection()
     device_name=str(data.get('device_name','Browser'))[:80]
-    updated=conn.execute(
-        'UPDATE user_devices SET user_id=?,identity_public_key=?,device_name=?,signed_prekey=?,one_time_prekey=?,last_seen_at=?,revoked=0 WHERE device_id=?',
-        (uid,identity,device_name,data.get('signed_prekey'),data.get('one_time_prekey'),now,device_id)
-    ).rowcount
-    if not updated:
-        try:
-            conn.execute('INSERT INTO user_devices(user_id,device_id,device_name,identity_public_key,signed_prekey,one_time_prekey,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)',(uid,device_id,device_name,identity,data.get('signed_prekey'),data.get('one_time_prekey'),now,now))
-        except sqlite3.IntegrityError:
-            conn.execute(
-                'UPDATE user_devices SET user_id=?,identity_public_key=?,device_name=?,signed_prekey=?,one_time_prekey=?,last_seen_at=?,revoked=0 WHERE device_id=?',
-                (uid,identity,device_name,data.get('signed_prekey'),data.get('one_time_prekey'),now,device_id)
-            )
+    existing=conn.execute('SELECT user_id FROM user_devices WHERE device_id=?',(device_id,)).fetchone()
+    if existing and int(existing['user_id']) != int(uid):
+        conn.close(); return jsonify({'error':'device_id_already_registered'}),409
+    if existing:
+        conn.execute('UPDATE user_devices SET identity_public_key=?,device_name=?,signed_prekey=?,one_time_prekey=?,last_seen_at=?,revoked=0 WHERE device_id=? AND user_id=?',
+                     (identity,device_name,data.get('signed_prekey'),data.get('one_time_prekey'),now,device_id,uid))
+    else:
+        conn.execute('INSERT INTO user_devices(user_id,device_id,device_name,identity_public_key,signed_prekey,one_time_prekey,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)',
+                     (uid,device_id,device_name,identity,data.get('signed_prekey'),data.get('one_time_prekey'),now,now))
     conn.commit(); conn.close(); return jsonify({'ok':True,'device_id':device_id})
+
 
 @app.route('/api/e2ee/devices')
 def devices():
@@ -1953,6 +2178,9 @@ def messages():
         """,
         (current_user_id,)
     ).fetchall()
+    chat_groups = conn.execute("""SELECT cg.*, (SELECT COUNT(*) FROM chat_group_members cm WHERE cm.chat_group_id=cg.id) AS member_count
+        FROM chat_groups cg JOIN chat_group_members mine ON mine.chat_group_id=cg.id AND mine.user_id=? ORDER BY cg.id DESC LIMIT 12""",(current_user_id,)).fetchall()
+    social_groups = conn.execute("SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name",(current_user_id,)).fetchall()
 
     conn.close()
 
@@ -1960,7 +2188,9 @@ def messages():
         "messages.html",
         current_user=current_user,
         conversations=conversations,
-        users=users
+        users=users,
+        chat_groups=chat_groups,
+        social_groups=social_groups
     )
 
 
@@ -1988,22 +2218,27 @@ def chat(user_id):
     if not other_user:
         conn.close(); return "<h1>User not found</h1>", 404
     blocked = users_are_blocked(conn, current_user_id, user_id)
-    conn.execute("""UPDATE messages SET delivered_at=COALESCE(delivered_at, ?), is_read=1, read_at=COALESCE(read_at, ?) WHERE sender_id=? AND receiver_id=?""",
-                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id, current_user_id))
+    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at<=?", (now,))
+    if not blocked:
+        conn.execute("""UPDATE messages SET delivered_at=COALESCE(delivered_at, ?), is_read=1, read_at=COALESCE(read_at, ?) WHERE sender_id=? AND receiver_id=?""",
+                     (now, now, user_id, current_user_id))
     chat_messages = conn.execute("""
         SELECT m.*, sender.name AS sender_name FROM messages m
         JOIN users sender ON sender.id=m.sender_id
-        WHERE (m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?)
+        WHERE ((m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?))
+          AND (m.expires_at IS NULL OR m.expires_at > ?)
         ORDER BY m.id ASC
-    """, (current_user_id,user_id,user_id,current_user_id)).fetchall()
+    """, (current_user_id,user_id,user_id,current_user_id,now)).fetchall()
     current_user = conn.execute("SELECT * FROM users WHERE id=?", (current_user_id,)).fetchone()
     other_public_key = get_public_key(conn, user_id)
     my_public_key = get_public_key(conn, current_user_id)
-    pref = conn.execute('SELECT theme,wallpaper,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?',(current_user_id,user_id)).fetchone()
+    pref = conn.execute('SELECT theme,wallpaper,disappearing_seconds,e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(current_user_id,user_id)).fetchone()
+    peer_pref = conn.execute('SELECT e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(user_id,current_user_id)).fetchone()
     conn.commit(); conn.close()
     response = make_response(render_template("chat.html", current_user=current_user, other_user=other_user,
                            chat_messages=chat_messages, blocked=blocked,
-                           my_public_key=my_public_key, other_public_key=other_public_key, chat_pref=(dict(pref) if pref else {'theme':'default','wallpaper':'none','disappearing_seconds':0})))
+                           my_public_key=my_public_key, other_public_key=other_public_key, chat_pref=(dict(pref) if pref else {'theme':'default','wallpaper':'none','disappearing_seconds':0,'e2ee_enabled':0}), peer_e2ee_enabled=bool(peer_pref and peer_pref['e2ee_enabled'])))
     # Chat pages must not be served from a stale browser cache. This is especially
     # important after removing the legacy voice/video-call JavaScript.
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -2051,30 +2286,38 @@ def send_message():
     ciphertext=request.form.get("ciphertext","").strip()
     iv=request.form.get("iv","").strip()
     message_text=request.form.get("message","").strip()
-    if not receiver_id or (not ciphertext and not message_text):
-        if request.headers.get("X-Requested-With")=="XMLHttpRequest":
-            return jsonify({"error":"Encrypted message is required."}),400
-        flash("Encrypted message is required.", "error")
-        return redirect(url_for("messages"))
-    if receiver_id==sender_id: return jsonify({"error":"You cannot message yourself."}),400
+    if not receiver_id or receiver_id==sender_id:
+        return jsonify({"error":"Invalid recipient."}),400
     conn=get_db_connection()
     recipient=conn.execute("SELECT id FROM users WHERE id=?",(receiver_id,)).fetchone()
     if not recipient: conn.close(); return jsonify({"error":"Recipient not found."}),404
     if users_are_blocked(conn,sender_id,receiver_id): conn.close(); return jsonify({"error":"You cannot message this user because one of you has blocked the other."}),403
-    if ciphertext and (len(ciphertext)>20000 or len(iv)>100): conn.close(); return jsonify({"error":"Encrypted payload is too large."}),400
+    pref=conn.execute("SELECT e2ee_enabled,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",(sender_id,receiver_id)).fetchone()
+    secure=bool(pref and pref["e2ee_enabled"])
+    if secure:
+        if not ciphertext or not iv:
+            conn.close(); return jsonify({"error":"Secure chat is enabled. Your browser could not encrypt this message."}),400
+        if len(ciphertext)>20000 or len(iv)>100:
+            conn.close(); return jsonify({"error":"Encrypted payload is too large."}),400
+        stored_message="[Encrypted message]"; encryption_version=1
+    else:
+        if not message_text:
+            conn.close(); return jsonify({"error":"Message cannot be empty."}),400
+        if len(message_text)>5000:
+            conn.close(); return jsonify({"error":"Message is too long."}),400
+        ciphertext=None; iv=None; stored_message=message_text; encryption_version=0
     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pref=conn.execute("SELECT disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",(sender_id,receiver_id)).fetchone()
     disappear=int(pref["disappearing_seconds"] if pref else 0)
     expires_at=None
     if disappear>0:
         from datetime import timedelta
         expires_at=(datetime.now()+timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
     cursor=conn.execute("""INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL)""",
-                        (sender_id,receiver_id,"[Encrypted message]" if ciphertext else message_text,ciphertext or None,iv or None,1 if ciphertext else 0,created_at,expires_at))
+                        (sender_id,receiver_id,stored_message,ciphertext,iv,encryption_version,created_at,expires_at))
     message_id=cursor.lastrowid; conn.commit(); conn.close()
     return jsonify({"ok":True,"message":{"id":message_id,"sender_id":sender_id,"receiver_id":receiver_id,
-        "message":"[Encrypted message]" if ciphertext else message_text,"ciphertext":ciphertext,"iv":iv,
-        "encryption_version":1 if ciphertext else 0,"created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None}})
+        "message":stored_message,"ciphertext":ciphertext,"iv":iv,"encryption_version":encryption_version,
+        "created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None}})
 
 
 @app.route("/api/messages/<int:user_id>")
@@ -2462,6 +2705,122 @@ def group_updates(group_id):
     conn.close(); return jsonify({"post_count":post_count,"member_count":member_count,"pending_requests":request_count,"latest_post_id":latest["id"] if latest else 0,"new_posts":[dict(r) for r in new_posts]})
 
 
+# ---------------------------------------------------------
+# Chat groups
+# ---------------------------------------------------------
+
+def chat_group_member(conn, group_id, user_id):
+    return conn.execute("SELECT role FROM chat_group_members WHERE chat_group_id=? AND user_id=?", (group_id, user_id)).fetchone()
+
+
+def chat_group_visible(conn, group_id, user_id):
+    group=conn.execute("SELECT * FROM chat_groups WHERE id=?", (group_id,)).fetchone()
+    if not group: return None, False
+    member=bool(chat_group_member(conn, group_id, user_id))
+    return group, member
+
+
+@app.route("/chat-groups/create", methods=["POST"])
+def create_chat_group():
+    if not user_required(): return redirect(url_for("user_login"))
+    require_csrf(); uid=session["user_id"]
+    name=request.form.get("name","").strip()[:120]
+    description=request.form.get("description","").strip()[:500]
+    kind=request.form.get("kind","open")
+    source_group_id=request.form.get("source_group_id",type=int)
+    if not name:
+        flash("Chat group name is required.","error"); return redirect(url_for("messages"))
+    conn=get_db_connection(); now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    members=[uid]
+    privacy="open"
+    if kind=="linked":
+        source=conn.execute("SELECT * FROM groups WHERE id=?",(source_group_id,)).fetchone() if source_group_id else None
+        if not source or not conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(source_group_id,uid)).fetchone():
+            conn.close(); flash("You must be a member of the selected UniversityConnect group to create its chat.","error"); return redirect(url_for("messages"))
+        members=[r["user_id"] for r in conn.execute("SELECT user_id FROM group_members WHERE group_id=?",(source_group_id,)).fetchall()]
+        if uid not in members: members.append(uid)
+        privacy="linked"
+    cursor=conn.execute("INSERT INTO chat_groups(name,description,privacy,created_by,source_group_id,created_at) VALUES(?,?,?,?,?,?)",(name,description,privacy,uid,source_group_id if kind=="linked" else None,now))
+    gid=cursor.lastrowid
+    for member_id in members:
+        role="owner" if member_id==uid else "member"
+        conn.execute("INSERT OR IGNORE INTO chat_group_members(chat_group_id,user_id,role,joined_at) VALUES(?,?,?,?)",(gid,member_id,role,now))
+    conn.commit(); conn.close()
+    flash("Chat group created.","success")
+    return redirect(url_for("chat_group",group_id=gid))
+
+
+@app.route("/chat-groups/<int:group_id>")
+def chat_group(group_id):
+    if not user_required(): return redirect(url_for("user_login"))
+    uid=session["user_id"]; conn=get_db_connection(); group,member=chat_group_visible(conn,group_id,uid)
+    if not group: conn.close(); abort(404)
+    if not member:
+        conn.close(); return render_template("chat_group.html",group=group,member=False,messages=[],members=[],csrf=csrf_token(),can_join=group["privacy"]=="open")
+    rows=conn.execute("SELECT m.*,u.name,u.photo FROM chat_group_messages m JOIN users u ON u.id=m.sender_id WHERE m.chat_group_id=? ORDER BY m.id DESC LIMIT 200",(group_id,)).fetchall()
+    rows=list(reversed(rows))
+    members=conn.execute("SELECT u.id,u.name,u.username,u.photo,m.role FROM chat_group_members m JOIN users u ON u.id=m.user_id WHERE m.chat_group_id=? ORDER BY CASE WHEN m.role='owner' THEN 0 ELSE 1 END,u.name",(group_id,)).fetchall()
+    conn.close(); return render_template("chat_group.html",group=group,member=True,messages=rows,members=members,csrf=csrf_token(),can_join=False,current_user_id=uid)
+
+
+@app.route("/chat-groups/<int:group_id>/join",methods=["POST"])
+def join_chat_group(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection(); group=conn.execute("SELECT * FROM chat_groups WHERE id=?",(group_id,)).fetchone()
+    if not group: conn.close(); return jsonify({"error":"not_found"}),404
+    if group["privacy"]!="open": conn.close(); return jsonify({"error":"This chat is linked to an existing group and is membership-controlled."}),403
+    conn.execute("INSERT OR IGNORE INTO chat_group_members(chat_group_id,user_id,role,joined_at) VALUES(?,?,?,?)",(group_id,uid,"member",datetime.now().strftime("%Y-%m-%d %H:%M:%S"))); conn.commit(); conn.close(); return jsonify({"ok":True})
+
+
+@app.route("/chat-groups/<int:group_id>/leave",methods=["POST"])
+def leave_chat_group(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection(); group=conn.execute("SELECT * FROM chat_groups WHERE id=?",(group_id,)).fetchone()
+    member=conn.execute("SELECT role FROM chat_group_members WHERE chat_group_id=? AND user_id=?",(group_id,uid)).fetchone()
+    if not group or not member: conn.close(); return jsonify({"error":"not_member"}),403
+    if group["created_by"]==uid:
+        conn.close(); return jsonify({"error":"The owner cannot leave. Transfer ownership or delete the chat group first."}),400
+    conn.execute("DELETE FROM chat_group_members WHERE chat_group_id=? AND user_id=?",(group_id,uid)); conn.commit(); conn.close(); return jsonify({"ok":True})
+
+
+@app.route("/chat-groups/<int:group_id>/send",methods=["POST"])
+def send_chat_group_message(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; text=request.form.get("message","").strip()[:5000]
+    if not text: return jsonify({"error":"Message cannot be empty."}),400
+    conn=get_db_connection(); group=conn.execute("SELECT id FROM chat_groups WHERE id=?",(group_id,)).fetchone(); member=chat_group_member(conn,group_id,uid)
+    if not group or not member: conn.close(); return jsonify({"error":"not_allowed"}),403
+    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); cur=conn.execute("INSERT INTO chat_group_messages(chat_group_id,sender_id,message,created_at) VALUES(?,?,?,?)",(group_id,uid,text,now)); mid=cur.lastrowid; conn.commit()
+    row=conn.execute("SELECT m.*,u.name,u.photo FROM chat_group_messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?",(mid,)).fetchone(); conn.close()
+    return jsonify({"ok":True,"message":dict(row)})
+
+
+@app.route("/api/chat-groups/<int:group_id>/messages")
+def api_chat_group_messages(group_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    uid=session["user_id"]
+    try: since=max(0,int(request.args.get("since",0)))
+    except (TypeError,ValueError): since=0
+    conn=get_db_connection(); group=conn.execute("SELECT id FROM chat_groups WHERE id=?",(group_id,)).fetchone(); member=chat_group_member(conn,group_id,uid)
+    if not group or not member: conn.close(); return jsonify({"error":"not_allowed"}),403
+    rows=conn.execute("SELECT m.*,u.name,u.photo FROM chat_group_messages m JOIN users u ON u.id=m.sender_id WHERE m.chat_group_id=? AND m.id>? ORDER BY m.id ASC LIMIT 100",(group_id,since)).fetchall(); conn.close()
+    return jsonify({"messages":[dict(r) for r in rows]})
+
+
+@app.route("/chat-groups")
+def chat_groups_page():
+    if not user_required(): return redirect(url_for("user_login"))
+    uid=session["user_id"]; conn=get_db_connection()
+    groups=conn.execute("""SELECT cg.*,u.name AS creator_name,
+        (SELECT COUNT(*) FROM chat_group_members cm WHERE cm.chat_group_id=cg.id) AS member_count,
+        EXISTS(SELECT 1 FROM chat_group_members me WHERE me.chat_group_id=cg.id AND me.user_id=?) AS joined
+        FROM chat_groups cg JOIN users u ON u.id=cg.created_by
+        WHERE cg.privacy='open' OR EXISTS(SELECT 1 FROM chat_group_members mine WHERE mine.chat_group_id=cg.id AND mine.user_id=?)
+        ORDER BY cg.id DESC""",(uid,uid)).fetchall()
+    social_groups=conn.execute("""SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name""",(uid,)).fetchall()
+    conn.close(); return render_template("chat_groups.html",groups=groups,social_groups=social_groups,csrf=csrf_token())
+
+
 @app.route("/admin/analytics")
 def admin_analytics():
     if not admin_required(): return redirect(url_for("login"))
@@ -2785,6 +3144,10 @@ def admin_delete_user(user_id):
         conn.close()
         flash("User not found.", "error")
         return redirect(url_for("admin_users"))
+    post_media = conn.execute("SELECT media_token, original_name FROM posts WHERE user_id=?", (user_id,)).fetchall()
+    story_media = conn.execute("SELECT media_token, original_name FROM stories WHERE user_id=?", (user_id,)).fetchall()
+    for item in [*post_media, *story_media]:
+        remove_private_media(item["media_token"], item["original_name"])
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
     conn.close()
@@ -3235,6 +3598,11 @@ def delete_user(user_id):
 
         except OSError:
             pass
+
+    post_media = conn.execute("SELECT media_token, original_name FROM posts WHERE user_id=?", (user_id,)).fetchall()
+    story_media = conn.execute("SELECT media_token, original_name FROM stories WHERE user_id=?", (user_id,)).fetchall()
+    for item in [*post_media, *story_media]:
+        remove_private_media(item["media_token"], item["original_name"])
 
     # -----------------------------------------------------
     # Delete database records

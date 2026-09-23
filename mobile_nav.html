@@ -1,0 +1,37 @@
+<style>
+.mobile-bottom-nav{display:none}.mobile-more-sheet{display:none}
+@media(max-width:760px){
+body{padding-bottom:68px!important}.mobile-bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;height:68px;background:rgba(255,255,255,.98);border-top:1px solid #dfe3e8;box-shadow:0 -4px 18px rgba(0,0,0,.12);z-index:9999;align-items:stretch;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom);backdrop-filter:blur(14px)}
+.mobile-bottom-nav a,.mobile-bottom-nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none!important;border:0!important;color:#65676b!important;text-decoration:none;font:700 10px/1.1 Arial,sans-serif;padding:4px 2px!important;margin:0!important;min-width:0;cursor:pointer;position:relative}.mobile-bottom-nav a.active,.mobile-bottom-nav button.active{color:#1877f2!important}.mobile-icon{font-size:21px;line-height:1}.mobile-badge{position:absolute;top:7px;right:calc(50% - 18px);min-width:17px;height:17px;padding:0 4px;border-radius:99px;background:#e41e3f;color:#fff;font:900 10px/17px Arial,sans-serif;text-align:center}
+.mobile-more-sheet{position:fixed;left:10px;right:10px;bottom:76px;z-index:9998;background:#fff;border:1px solid #dfe3e8;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.22);padding:8px;display:none}.mobile-more-sheet.open{display:block}.mobile-more-sheet a{display:flex;gap:10px;align-items:center;padding:13px 12px;border-radius:10px;color:#1c1e21;text-decoration:none;font-weight:750}.mobile-more-sheet a:hover{background:#f2f3f5}.mobile-more-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:9997}.mobile-more-backdrop.open{display:block}
+}
+html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-sheet{background:#18191a!important;color:#e4e6eb!important;border-color:#303134!important}.mobile-bottom-nav a,.mobile-bottom-nav button{color:#65676b}.mobile-more-sheet a{color:#e4e6eb}.mobile-more-sheet a:hover{background:#242526}
+</style>
+<div class="mobile-more-backdrop" id="mobileMoreBackdrop" onclick="toggleMobileMore(false)"></div>
+<div class="mobile-more-sheet" id="mobileMoreSheet">
+<a href="{{ url_for('campus_services') }}">🏫 <span>Campus Services</span></a><a href="{{ url_for('groups_page') }}">👥 <span>Groups</span></a><a href="{{ url_for('my_profile') }}">👤 <span>Profile / CV</span></a><a href="{{ url_for('profile_settings') }}">⚙️ <span>Profile & Study Settings</span></a><a href="{{ url_for('appearance_settings') }}">🎨 <span>Appearance</span></a><a href="{{ url_for('user_home') }}#people">🔎 <span>Find Students</span></a><a href="{{ url_for('user_logout') }}">↪️ <span>Log Out</span></a>
+</div>
+
+<style>
+.uc-message-toast{position:fixed;right:20px;top:20px;z-index:100000;width:min(360px,calc(100vw - 32px));background:var(--card,#fff);color:var(--text,#172033);border:1px solid var(--line,#e1e5ea);border-radius:14px;box-shadow:0 12px 35px rgba(0,0,0,.22);padding:12px 14px;display:none;cursor:pointer}.uc-message-toast.show{display:block;animation:ucToastIn .22s ease-out}.uc-message-toast .t{font-weight:900}.uc-message-toast .b{font-size:13px;margin-top:3px;color:var(--muted,#667085);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.uc-message-toast .x{position:absolute;right:8px;top:6px;border:0;background:none;color:inherit;font-size:18px;cursor:pointer}@keyframes ucToastIn{from{transform:translateY(-8px);opacity:0}to{transform:none;opacity:1}}
+</style>
+<div id="ucMessageToast" class="uc-message-toast" role="status" aria-live="polite" onclick="if(window.__ucToastHref)location.href=window.__ucToastHref"><button class="x" type="button" onclick="event.stopPropagation();hideUcMessageToast()">×</button><div class="t" id="ucMessageToastTitle">New message</div><div class="b" id="ucMessageToastBody"></div></div>
+<script>
+(function(){
+  if(window.__ucGlobalMessageNotifications)return; window.__ucGlobalMessageNotifications=true;
+  const key='uc_last_message_notice_id'; let ready=false;
+  function toast(m){const box=document.getElementById('ucMessageToast');if(!box)return;document.getElementById('ucMessageToastTitle').textContent='New message from '+(m.name||'Someone');document.getElementById('ucMessageToastBody').textContent=m.message&&m.message!=='[Encrypted message]'?m.message:'You received a new message.';window.__ucToastHref='/messages/'+m.sender_id;box.classList.add('show');clearTimeout(window.__ucToastTimer);window.__ucToastTimer=setTimeout(hideUcMessageToast,6500)}
+  window.hideUcMessageToast=function(){const box=document.getElementById('ucMessageToast');if(box)box.classList.remove('show')};
+  async function check(){try{if(location.pathname.startsWith('/login')||location.pathname.startsWith('/user-login')||location.pathname.startsWith('/logout'))return;const r=await fetch('/api/message-notifications',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const rows=d.messages||[];const max=rows.length?Math.max.apply(null,rows.map(x=>Number(x.id)||0)):0;let last=Number(localStorage.getItem(key)||0);if(!ready){if(max) localStorage.setItem(key,String(max));ready=true;return}const fresh=rows.filter(x=>Number(x.id)>last).sort((a,b)=>Number(a.id)-Number(b.id));if(fresh.length){const m=fresh[fresh.length-1];localStorage.setItem(key,String(m.id));toast(m)}
+    document.querySelectorAll('.mobile-badge').forEach(b=>{if(d.unread_count)b.textContent=d.unread_count;else b.remove()});
+  }catch(e){}}
+  check(); setInterval(check,2000);
+})();
+</script>
+<nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+<a class="{% if request.endpoint == 'user_home' %}active{% endif %}" href="{{ url_for('user_home') }}"><span class="mobile-icon">⌂</span><span>Home</span></a>
+<a href="{{ url_for('user_home') }}#people"><span class="mobile-icon">♙</span><span>Network</span></a>
+<a class="{% if request.endpoint in ['messages','chat'] %}active{% endif %}" href="{{ url_for('messages') }}"><span class="mobile-icon">◉</span>{% if unread_count|default(0) %}<span class="mobile-badge">{{ unread_count }}</span>{% endif %}<span>Messages</span></a>
+<button type="button" onclick="toggleMobileMore()"><span class="mobile-icon">⋮</span><span>More</span></button>
+</nav>
+<script>function toggleMobileMore(force){const s=document.getElementById('mobileMoreSheet'),b=document.getElementById('mobileMoreBackdrop');if(!s||!b)return;const o=typeof force==='boolean'?force:!s.classList.contains('open');s.classList.toggle('open',o);b.classList.toggle('open',o)}document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleMobileMore(false)})</script>

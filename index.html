@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Admin Panel Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/css/intlTelInput.css">
+    <style>
+        @media (max-width: 800px){ body{padding:12px}.top-navbar{flex-direction:column;align-items:stretch;padding:14px}.dashboard-layout{flex-direction:column}.form-container{width:auto}.filter-panel{flex-direction:column;align-items:stretch}.admin-table-box{overflow-x:auto}table{min-width:720px}}
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; margin: 0; padding: 40px; }
+        .top-navbar { display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 20px auto; background: white; padding: 15px 30px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .logout-btn { color: #dc3545; font-weight: bold; text-decoration: none; border: 1px solid #dc3545; padding: 6px 15px; border-radius: 5px; }
+        .dashboard-layout { display: flex; gap: 30px; width: 100%; max-width: 1200px; margin: 0 auto; }
+        .form-container { background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); width: 350px; height: fit-content; }
+        .display-container { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+        
+        /* Filter Control Bar Styles */
+        .filter-panel { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); display: flex; gap: 15px; align-items: flex-end; }
+        .filter-group { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+        .filter-group label { font-size: 12px; font-weight: bold; color: #555; }
+        .filter-input { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .btn-filter, .btn-clear { padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; height: 40px; text-decoration: none; text-align: center; line-height: 20px; box-sizing: border-box; }
+        .btn-filter { background: #0066cc; color: white; }
+        .btn-clear { background: #e4e6eb; color: #333; }
+
+        /* Preview Display box rules */
+        .preview-box { width: 100%; height: 150px; border: 2px dashed #ccc; border-radius: 6px; margin-bottom: 15px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; }
+        .preview-box img { width: 100%; height: 100%; object-fit: cover; display: none; }
+        .preview-box span { color: #888; font-size: 13px; }
+
+        .stat-card { background: #ffffff; padding: 20px; border-radius: 10px; width: fit-content; min-width: 150px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-left: 5px solid #4CAF50; }
+        .form-group { margin-bottom: 18px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #555; font-size: 13px; }
+        input[type="text"], input[type="email"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        .submit-btn { background-color: #4CAF50; color: white; padding: 12px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 15px; font-weight: bold; }
+        .admin-table-box { background: #ffffff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #555; }
+        .user-thumb { width: 45px; height: 45px; border-radius: 50%; object-fit: cover; }
+        .btn-view { background-color: #0066cc; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold; }
+        .btn-delete { background-color: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; }
+    </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}"><script src="{{ url_for('static', filename='theme.js') }}"></script></head>
+<body>
+
+    <div class="top-navbar">
+        <h2>🔒 {{ site_name }} · Admin Panel</h2>
+        <div style="display:flex; gap:10px; align-items:center;">
+
+    <a href="{{ url_for('register') }}" style="color:#198754; font-weight:bold; text-decoration:none; border:1px solid #198754; padding:6px 15px; border-radius:5px;">Public Registration</a>
+    <a href="{{ url_for('user_login') }}" style="color:#0066cc; font-weight:bold; text-decoration:none; border:1px solid #0066cc; padding:6px 15px; border-radius:5px;">User Login</a>
+    <a
+        href="{{ url_for('activity_log') }}"
+        style="
+            color:#0066cc;
+            font-weight:bold;
+            text-decoration:none;
+            border:1px solid #0066cc;
+            padding:6px 15px;
+            border-radius:5px;
+        "
+    >
+        Activity Log
+    </a>
+
+    <a href="{{ url_for('admin_users') }}" style="color:#7c3aed; font-weight:bold; text-decoration:none; border:1px solid #7c3aed; padding:6px 15px; border-radius:5px;">Users</a>
+
+    <a
+        href="/logout"
+        class="logout-btn"
+    >
+        Log Out Session
+    </a>
+
+</div>
+    </div>
+
+    <div class="dashboard-layout">
+        <div class="form-container">
+            <h2>Add New Member</h2>
+            <form action="/" method="POST" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <!-- LIVE PREVIEW AREA CONTAINER -->
+                <div class="preview-box" id="picPreviewBox">
+                    <span id="previewText">Selected Photo Preview</span>
+                    <img id="previewImage" src="" alt="Upload Preview">
+                </div>
+                
+                <div class="form-group">
+                    <label for="photo">Upload Photo *</label>
+                    <!-- Trigger file rendering array shifts natively on selection alteration -->
+                    <input type="file" id="photo" name="photo" accept="image/*" required onchange="previewFile()">
+                </div>
+                <div class="form-group">
+                    <label for="name">Full Name *</label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" name="username" minlength="3" required>
+                </div>
+                <div class="form-group">
+                    <label for="gmail">Gmail Address *</label>
+                    <input type="email" id="gmail" name="gmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="phone">Phone Number *</label>
+                    <input type="tel" id="phone" name="phone" autocomplete="tel" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">User Login Password *</label>
+                    <input type="password" id="password" name="password" minlength="6" required>
+                </div>
+                <button type="submit" class="submit-btn">Register User</button>
+            </form>
+        </div>
+
+        <div class="form-container" style="width:350px;">
+            <h2>🌐 Website Identity</h2>
+            <p style="font-size:13px;color:#667085;line-height:1.5;">Only the authenticated administrator can change the public website name.</p>
+            <form action="/" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="form_type" value="site_settings">
+                <div class="form-group">
+                    <label for="site_name">Website Name</label>
+                    <input type="text" id="site_name" name="site_name" maxlength="80" value="{{ site_name }}" required>
+                </div>
+                <button type="submit" class="submit-btn">Save Website Name</button>
+            </form>
+        </div>
+
+        <div class="display-container">
+            <!-- DYNAMIC MULTI-ATTRIBUTE SEARCH AND FILTER BAR -->
+            <form action="/" method="GET" class="filter-panel">
+                <div class="filter-group">
+                    <label for="search">Search Identity or Email</label>
+                    <input type="text" id="search" name="search" class="filter-input" placeholder="e.g. John..." value="{{ search_query }}">
+                </div>
+                <div class="filter-group">
+                    <label for="status">Relationship Status</label>
+                    <select id="status" name="status" class="filter-input">
+                        <option value="">-- All Statuses --</option>
+                        <option value="Single" {% if status_filter == 'Single' %}selected{% endif %}>Single</option>
+                        <option value="In a Relationship" {% if status_filter == 'In a Relationship' %}selected{% endif %}>In a Relationship</option>
+                        <option value="Married" {% if status_filter == 'Married' %}selected{% endif %}>Married</option>
+                        <option value="It's Complicated" {% if status_filter == 'It\'s Complicated' %}selected{% endif %}>It's Complicated</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-filter">Apply Filters</button>
+                <a href="/" class="btn-clear">Reset</a>
+            </form>
+
+            <div class="admin-table-box">
+                <h3>Directory Matrix (Found: {{ total_users }})</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Photo</th>
+                            <th>Identity</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for profile in profiles %}
+                            <tr>
+                                <td><img src="{{ url_for('static', filename='uploads/' + profile['photo']) }}" class="user-thumb" alt="User"></td>
+                                <td>
+                                    <strong>{{ profile['name'] }}</strong><br>
+                                    <span style="font-size:12px; color:#666;">{{ profile['gmail'] }}</span>
+                                </td>
+                                <td><span style="background:#e4e6eb; padding:4px 8px; border-radius:15px; font-size:12px;">{{ profile['relationship_status'] }}</span></td>
+                                <td>
+                                    <div style="display:flex; gap:10px;">
+                                        <a href="/user/{{ profile['id'] }}" class="btn-view">View Profile</a>
+                                        <form action="/delete/{{ profile['id'] }}" method="POST" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn-delete" onclick="return confirm('Purge account?');">Delete</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="4" style="color:#777; font-style:italic; text-align:center;">No match records exist within active lookup scopes.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Frontend Upload Rendering Javascript -->
+    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/intlTelInput.min.js"></script>
+    <script>
+        const phoneInput=document.getElementById('phone');
+        if(phoneInput){
+            const adminPhone=window.intlTelInput(phoneInput,{initialCountry:'auto',nationalMode:true,autoPlaceholder:'aggressive',geoIpLookup:async cb=>{try{const r=await fetch('https://ipapi.co/json/');const d=await r.json();cb((d.country_code||'BD').toLowerCase())}catch(e){cb('bd')}},utilsScript:'https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/utils.js'});
+            phoneInput.form.addEventListener('submit',e=>{if(!adminPhone.isValidNumber()){e.preventDefault();alert('Please enter a valid phone number for the selected country.');return}phoneInput.value=adminPhone.getNumber()});
+        }
+        function previewFile() {
+            const preview = document.getElementById('previewImage');
+            const text = document.getElementById('previewText');
+            const file = document.getElementById('photo').files[0];
+            const reader = new FileReader();
+
+            reader.addEventListener("load", function () {
+                preview.src = reader.result;
+                preview.style.display = "block";
+                text.style.display = "none";
+            }, false);
+
+            if (file) {
+                reader.readAsDataURL(file);
+            }
+        }
+    </script>
+<p><a href="{{ url_for('admin_campus') }}">🏫 Manage Campus Services</a> · <a href="{{ url_for('admin_message_reports') }}">🚩 Message Reports</a></p>{% include 'admin_mobile_nav.html' %}<button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button></body>
+</html>
