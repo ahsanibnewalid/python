@@ -147,7 +147,65 @@ async function markAllNotifications(){const items=[...document.querySelectorAll(
 
 let storyCollection={{ stories|tojson }};let storyIndex=0;let currentStory=null;let storyTimer=null;
 function openStory(story){currentStory=story;storyIndex=Math.max(0,storyCollection.findIndex(s=>Number(s.id)===Number(story.id)));renderStory()}
-function renderStory(){if(!currentStory)return;const story=currentStory,viewer=document.getElementById('storyViewer'),media=document.getElementById('storyViewerMedia');clearTimeout(storyTimer);media.outerHTML=story.media_type==='video'?'<video id="storyViewerMedia" class="story-viewer-media" controls autoplay playsinline src="'+story.media_url+'"></video>':'<img id="storyViewerMedia" class="story-viewer-media" src="'+story.media_url+'" alt="Story">';document.getElementById('storyViewerAvatar').src='/static/uploads/'+encodeURIComponent(story.photo);document.getElementById('storyViewerName').textContent=story.name;document.getElementById('storyViewerTime').textContent=story.created_at||'';document.getElementById('storyViewerCaption').textContent=story.caption||'';document.getElementById('storyViewerProfile').href=story.profile_url;document.getElementById('storyDeleteBtn').style.display=story.is_mine?'block':'none';viewer.classList.add('open');const bar=document.querySelector('.story-progress span');if(bar){bar.style.transition='none';bar.style.width='0%';requestAnimationFrame(()=>{bar.style.transition='width 5s linear';bar.style.width='100%'})}storyTimer=setTimeout(()=>navigateStory(1),5000)}
+function renderStory(){
+if(!currentStory)return;
+const story=currentStory,viewer=document.getElementById('storyViewer'),oldMedia=document.getElementById('storyViewerMedia');
+clearTimeout(storyTimer);
+
+const mediaMarkup=story.media_type==='video'
+  ? '<video id="storyViewerMedia" class="story-viewer-media" controls autoplay playsinline preload="auto" src="'+story.media_url+'"></video>'
+  : '<img id="storyViewerMedia" class="story-viewer-media" src="'+story.media_url+'" alt="Story">';
+oldMedia.outerHTML=mediaMarkup;
+
+document.getElementById('storyViewerAvatar').src='/static/uploads/'+encodeURIComponent(story.photo);
+document.getElementById('storyViewerName').textContent=story.name;
+document.getElementById('storyViewerTime').textContent=story.created_at||'';
+document.getElementById('storyViewerCaption').textContent=story.caption||'';
+document.getElementById('storyViewerProfile').href=story.profile_url;
+document.getElementById('storyDeleteBtn').style.display=story.is_mine?'block':'none';
+viewer.classList.add('open');
+
+const currentMedia=document.getElementById('storyViewerMedia');
+const bar=document.querySelector('.story-progress span');
+if(bar){
+  bar.style.transition='none';
+  bar.style.width='0%';
+}
+
+if(story.media_type==='video'){
+  // Do NOT use a fixed 5-second story timer for videos.
+  // Let the complete uploaded video play and move to the next story only
+  // after the video's natural "ended" event.
+  const startVideoProgress=()=>{
+    if(!currentMedia.duration || !isFinite(currentMedia.duration)) return;
+    if(bar){
+      bar.style.transition='none';
+      bar.style.width='0%';
+      requestAnimationFrame(()=>{
+        bar.style.transition='width '+currentMedia.duration+'s linear';
+        bar.style.width='100%';
+      });
+    }
+  };
+  currentMedia.addEventListener('loadedmetadata',startVideoProgress,{once:true});
+  currentMedia.addEventListener('ended',()=>navigateStory(1),{once:true});
+  currentMedia.addEventListener('error',()=>{
+    if(bar){bar.style.transition='none';bar.style.width='100%';}
+  },{once:true});
+  if(currentMedia.readyState>=1) startVideoProgress();
+  const playPromise=currentMedia.play();
+  if(playPromise && typeof playPromise.catch==='function') playPromise.catch(()=>{});
+}else{
+  // Images retain the existing 5-second story duration.
+  if(bar){
+    requestAnimationFrame(()=>{
+      bar.style.transition='width 5s linear';
+      bar.style.width='100%';
+    });
+  }
+  storyTimer=setTimeout(()=>navigateStory(1),5000);
+} 
+}
 function navigateStory(delta){if(!storyCollection.length)return;let next=storyIndex+delta;if(next<0)next=storyCollection.length-1;if(next>=storyCollection.length){closeStory();return}storyIndex=next;currentStory=storyCollection[next];renderStory()}
 async function deleteCurrentStory(){if(!currentStory||!currentStory.is_mine)return;const id=currentStory.id;if(!confirm('Delete this story? It will disappear for everyone immediately.'))return;const r=await fetch('/stories/'+id+'/delete',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});const d=await r.json().catch(()=>({}));if(!r.ok){alert(d.error||'Could not delete story.');return}storyCollection=storyCollection.filter(s=>Number(s.id)!==Number(id));const card=document.querySelector('.story-link[href="#story-'+id+'"]');if(card)card.remove();if(storyCollection.length){storyIndex=Math.min(storyIndex,storyCollection.length-1);currentStory=storyCollection[storyIndex];renderStory()}else closeStory()}
 async function deleteStory(id,button){if(!confirm('Delete this story?'))return;button.disabled=true;const r=await fetch('/stories/'+id+'/delete',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});const d=await r.json().catch(()=>({}));if(!r.ok){alert(d.error||'Could not delete story.');button.disabled=false;return}const card=button.closest('.story-link');card?.remove();storyCollection=storyCollection.filter(s=>Number(s.id)!==Number(id))}
