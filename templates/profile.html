@@ -287,11 +287,8 @@
                 method="POST"
             >
 
-                <input
-                    type="hidden"
-                    name="form_type"
-                    value="personal_info"
-                >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="form_type" value="public_info">
 
                 <div class="form-row">
 
@@ -417,12 +414,27 @@
                 </div>
 
 
-                <button
-                    type="submit"
-                    class="save-btn"
-                >
-                    Update Profile
-                </button>
+                <hr style="margin:20px 0;border:0;border-top:1px solid #ddd">
+                <h3>Public profile information</h3>
+                <div class="form-row"><div><label>Full name</label><input type="text" name="name" value="{{ profile['name'] }}" required></div><div><label>Gmail</label><input type="text" name="gmail" value="{{ profile['gmail'] }}" required></div></div>
+                <div class="form-row"><div><label>Phone</label><input type="text" name="phone" value="{{ profile['phone'] or '' }}"></div><div><label>Location</label><input type="text" name="location" value="{{ profile['location'] or '' }}"></div></div>
+                <div class="form-row"><div><label>Date of birth</label><input type="date" name="birth_date" value="{{ profile['birth_date'] or '' }}"></div><div><label>Profile format</label><select name="profile_view"><option value="facebook" {% if profile['profile_view']!='cv' %}selected{% endif %}>Facebook Detailed</option><option value="cv" {% if profile['profile_view']=='cv' %}selected{% endif %}>Professional CV</option></select></div></div>
+                <div class="form-row"><div><label>Headline</label><input type="text" name="headline" value="{{ profile['headline'] or '' }}"></div><div><label>Occupation</label><input type="text" name="occupation" value="{{ profile['occupation'] or '' }}"></div></div>
+                <div class="form-row"><div><label>Company / Organization</label><input type="text" name="company" value="{{ profile['company'] or '' }}"></div><div><label>Website / Portfolio</label><input type="text" name="website" value="{{ profile['website'] or '' }}"></div></div>
+                <div class="form-row"><div><label>University / Institution</label><input type="text" name="university" value="{{ profile['university'] or '' }}"></div><div><label>Student ID</label><input type="text" name="student_id" value="{{ profile['student_id'] or '' }}"></div></div>
+                <div class="form-row"><div><label>Study status</label><input type="text" name="study_status" value="{{ profile['study_status'] or '' }}"></div><div><label>Department / Major</label><input type="text" name="department" value="{{ profile['department'] or '' }}"></div></div>
+                <div class="form-row"><div><label>Academic year</label><input type="text" name="academic_year" value="{{ profile['academic_year'] or '' }}"></div><div><label>Semester</label><input type="text" name="semester" value="{{ profile['semester'] or '' }}"></div></div>
+                <label>About / Bio</label><textarea name="bio" rows="3" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['bio'] or '' }}</textarea>
+                <label>Education</label><textarea name="education" rows="3" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['education'] or '' }}</textarea>
+                <label>Experience</label><textarea name="experience" rows="3" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['experience'] or '' }}</textarea>
+                <label>Skills</label><textarea name="skills" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['skills'] or '' }}</textarea>
+                <label>Achievements</label><textarea name="achievements" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['achievements'] or '' }}</textarea>
+                <label>Projects</label><textarea name="projects" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['projects'] or '' }}</textarea>
+                <label>Certifications</label><textarea name="certifications" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['certifications'] or '' }}</textarea>
+                <label>Career objective</label><textarea name="career_objective" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['career_objective'] or '' }}</textarea>
+                <label>References</label><textarea name="references_text" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['references_text'] or '' }}</textarea>
+                <label>Interests</label><textarea name="interests" rows="2" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px">{{ profile['interests'] or '' }}</textarea>
+                <button type="submit" class="save-btn">Update All Public Information</button>
 
             </form>
 
@@ -434,6 +446,7 @@
             <h3>Reset User Login Password</h3>
             <p style="color:#666; font-size:13px;">This changes the password used at <strong>/user-login</strong>.</p>
             <form action="{{ url_for('view_profile', user_id=profile['id']) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="form_type" value="password_reset">
                 <div class="form-row">
                     <div>
@@ -446,6 +459,18 @@
                     </div>
                 </div>
                 <button type="submit" class="save-btn">Set Login Password</button>
+            </form>
+        </div>
+
+        <!-- ADMIN MEDIA -->
+        <div class="gallery-card" style="margin-bottom:20px;">
+            <h3>Profile & Cover Photos</h3>
+            <form action="{{ url_for('view_profile', user_id=profile['id']) }}" method="POST" enctype="multipart/form-data" class="upload-box">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="form_type" value="admin_media">
+                <label>New profile photo</label><input type="file" name="photo" accept="image/*">
+                <label>New cover photo</label><input type="file" name="cover_photo" accept="image/*">
+                <button type="submit" class="save-btn">Update Profile / Cover Photos</button>
             </form>
         </div>
 
@@ -470,6 +495,7 @@
 
                 <input
                     type="hidden"
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     name="form_type"
                     value="gallery_upload"
                 >
@@ -521,7 +547,7 @@
                             ) }}"
                             method="POST"
                             class="delete-gallery-form"
-                            onsubmit="return confirm(
+                            ><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">\n                            onsubmit="return confirm(
                                 'Delete this photo permanently?'
                             );"
                         >
