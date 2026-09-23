@@ -70,17 +70,6 @@ def test_phone_normalization_accepts_bangladesh_local_number():
     assert app.valid_phone("+8801712345678")
 
 
-def test_init_db_is_idempotent_with_existing_e2ee_column():
-    # Regression test for the duplicate-column startup crash reported when an
-    # older local database already contains chat_preferences.e2ee_enabled.
-    app.init_db()
-    app.init_db()
-    conn = app.get_db_connection()
-    cols = {str(row["name"]).lower() for row in conn.execute("PRAGMA table_info(chat_preferences)").fetchall()}
-    conn.close()
-    assert "e2ee_enabled" in cols
-
-
 def test_post_schema_supports_reels():
     conn = app.get_db_connection()
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}

@@ -49,10 +49,3 @@ Never restore an old committed `.env` or `database.db`.
 - JavaScript blocks in the repaired social/chat templates pass Node syntax checking after template-token stripping.
 
 The execution environment used for this repair did not have Flask/Werkzeug installed and could not download packages, so a live Flask/pytest integration run could not be performed here. Run `pytest -q` inside the project's normal virtual environment before deployment.
-
-## 2026-09-24 startup migration hotfix
-
-- Fixed an idempotent SQLite migration crash where an existing `chat_preferences.e2ee_enabled` column could cause `init_db()` to abort with `duplicate column name: e2ee_enabled`.
-- Fresh databases now create `e2ee_enabled` directly in `chat_preferences`.
-- Existing databases tolerate the specific duplicate-column migration state.
-- Added a regression test that calls `init_db()` twice and verifies the E2EE preference column remains available.

@@ -400,31 +400,15 @@ def init_db():
             theme TEXT NOT NULL DEFAULT 'default',
             wallpaper TEXT NOT NULL DEFAULT 'none',
             disappearing_seconds INTEGER NOT NULL DEFAULT 0,
-            e2ee_enabled INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, peer_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (peer_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
-
-    # Idempotent migration for databases created by older builds.  Some
-    # existing SQLite databases already contain e2ee_enabled even when the
-    # schema-introspection result is stale/inconsistent (for example after a
-    # previous interrupted migration).  SQLite raises OperationalError for a
-    # duplicate column, so tolerate only that specific migration race/state.
-    chat_pref_columns = {
-        str(row["name"]).lower()
-        for row in conn.execute("PRAGMA table_info(chat_preferences)").fetchall()
-    }
+    chat_pref_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_preferences)").fetchall()}
     if "e2ee_enabled" not in chat_pref_columns:
-        try:
-            conn.execute(
-                "ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0"
-            )
-        except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc).lower():
-                raise
+        conn.execute("ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_groups (
@@ -1520,44 +1504,6 @@ def create_story():
     if wants_json:
         return jsonify({"ok": True, "message": "Your story is live for 24 hours.", "story_id": story_id})
     flash("Your story is live for 24 hours.", "success")
-    return redirect(url_for("user_home"))
-
-
-@app.route("/stories/<int:story_id>/delete", methods=["POST"])
-def delete_story(story_id):
-    """Delete a currently active story owned by the logged-in user."""
-    wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", "")
-    if not user_required():
-        return (jsonify({"error": "login_required"}), 401) if wants_json else redirect(url_for("user_login"))
-    require_csrf()
-    uid = int(session["user_id"])
-    conn = get_db_connection()
-    story = conn.execute(
-        "SELECT id, media_token, original_name FROM stories WHERE id=? AND user_id=?",
-        (story_id, uid),
-    ).fetchone()
-    if not story:
-        conn.close()
-        if wants_json:
-            return jsonify({"error": "Story not found or you are not the owner."}), 404
-        flash("Story not found or you are not allowed to delete it.", "error")
-        return redirect(url_for("user_home"))
-    try:
-        remove_private_media(story["media_token"], story["original_name"])
-        conn.execute("DELETE FROM stories WHERE id=? AND user_id=?", (story_id, uid))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        conn.close()
-        app.logger.exception("Story deletion failed")
-        if wants_json:
-            return jsonify({"error": "The story could not be deleted."}), 500
-        flash("The story could not be deleted.", "error")
-        return redirect(url_for("user_home"))
-    conn.close()
-    if wants_json:
-        return jsonify({"ok": True, "story_id": story_id})
-    flash("Story deleted.", "success")
     return redirect(url_for("user_home"))
 
 
