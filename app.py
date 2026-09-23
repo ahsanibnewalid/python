@@ -2515,9 +2515,17 @@ def admin_campus():
                 if not uid or not name: raise ValueError("University and batch name are required.")
                 conn.execute("INSERT INTO batches(university_id,department_id,name,start_year,end_year,created_at) VALUES(?,?,?,?,?,?)",(uid,did,name,sy,ey,now)); flash("Batch created.","success")
             elif kind == "group":
-                uid=request.form.get("university_id",type=int); did=request.form.get("department_id",type=int) or None; name=request.form.get("name","").strip(); desc=request.form.get("description","").strip(); privacy=request.form.get("privacy","university")
+                uid=request.form.get("university_id",type=int); did=request.form.get("department_id",type=int) or None; name=request.form.get("name","").strip(); desc=request.form.get("description","").strip(); privacy=request.form.get("privacy","university"); admin_user_id=request.form.get("group_admin_user_id",type=int) or None
                 if not uid or not name: raise ValueError("University and group name are required.")
-                conn.execute("INSERT INTO groups(university_id,department_id,name,description,privacy,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(uid,did,name,desc,privacy,None,now)); flash("Group created.","success")
+                if admin_user_id and not conn.execute("SELECT id FROM users WHERE id=? AND university_id=?",(admin_user_id,uid)).fetchone(): raise ValueError("Selected group administrator must belong to the selected university.")
+                if not admin_user_id:
+                    candidate=conn.execute("SELECT id FROM users WHERE university_id=? ORDER BY id LIMIT 1",(uid,)).fetchone()
+                    admin_user_id=candidate["id"] if candidate else None
+                cur=conn.execute("INSERT INTO groups(university_id,department_id,name,description,privacy,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(uid,did,name,desc,privacy,admin_user_id,now)); gid=cur.lastrowid
+                if admin_user_id:
+                    conn.execute("INSERT OR IGNORE INTO group_members(group_id,user_id,joined_at) VALUES(?,?,?)",(gid,admin_user_id,now))
+                    conn.execute("INSERT OR IGNORE INTO group_admins(group_id,user_id,created_at) VALUES(?,?,?)",(gid,admin_user_id,now))
+                flash("Group created with a member administrator.","success")
             elif kind == "announcement":
                 uid=request.form.get("university_id",type=int) or None; title=request.form.get("title","").strip(); body=request.form.get("body","").strip()
                 if not title or not body: raise ValueError("Title and announcement body are required.")
@@ -2727,6 +2735,10 @@ def chat_group_visible(conn, group_id, user_id):
     group=conn.execute("SELECT * FROM chat_groups WHERE id=?", (group_id,)).fetchone()
     if not group: return None, False
     member=bool(chat_group_member(conn, group_id, user_id))
+    if not member and group["privacy"]=="linked" and group["source_group_id"]:
+        if conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],user_id)).fetchone():
+            conn.execute("INSERT OR IGNORE INTO chat_group_members(chat_group_id,user_id,role,joined_at) VALUES(?,?,?,?)",(group_id,user_id,"member",datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit(); member=True
     return group, member
 
 
@@ -2778,7 +2790,11 @@ def join_chat_group(group_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf(); uid=session["user_id"]; conn=get_db_connection(); group=conn.execute("SELECT * FROM chat_groups WHERE id=?",(group_id,)).fetchone()
     if not group: conn.close(); return jsonify({"error":"not_found"}),404
-    if group["privacy"]!="open": conn.close(); return jsonify({"error":"This chat is linked to an existing group and is membership-controlled."}),403
+    if group["privacy"]=="linked":
+        if not group["source_group_id"] or not conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],uid)).fetchone():
+            conn.close(); return jsonify({"error":"You must be a member of the linked UniversityConnect group."}),403
+    elif group["privacy"]!="open":
+        conn.close(); return jsonify({"error":"This chat is membership-controlled."}),403
     conn.execute("INSERT OR IGNORE INTO chat_group_members(chat_group_id,user_id,role,joined_at) VALUES(?,?,?,?)",(group_id,uid,"member",datetime.now().strftime("%Y-%m-%d %H:%M:%S"))); conn.commit(); conn.close(); return jsonify({"ok":True})
 
 
@@ -2823,10 +2839,13 @@ def chat_groups_page():
     uid=session["user_id"]; conn=get_db_connection()
     groups=conn.execute("""SELECT cg.*,u.name AS creator_name,
         (SELECT COUNT(*) FROM chat_group_members cm WHERE cm.chat_group_id=cg.id) AS member_count,
-        EXISTS(SELECT 1 FROM chat_group_members me WHERE me.chat_group_id=cg.id AND me.user_id=?) AS joined
+        (EXISTS(SELECT 1 FROM chat_group_members me WHERE me.chat_group_id=cg.id AND me.user_id=?)
+         OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members gm WHERE gm.group_id=cg.source_group_id AND gm.user_id=?))) AS joined
         FROM chat_groups cg JOIN users u ON u.id=cg.created_by
-        WHERE cg.privacy='open' OR EXISTS(SELECT 1 FROM chat_group_members mine WHERE mine.chat_group_id=cg.id AND mine.user_id=?)
-        ORDER BY cg.id DESC""",(uid,uid)).fetchall()
+        WHERE cg.privacy='open'
+           OR EXISTS(SELECT 1 FROM chat_group_members mine WHERE mine.chat_group_id=cg.id AND mine.user_id=?)
+           OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members source_member WHERE source_member.group_id=cg.source_group_id AND source_member.user_id=?))
+        ORDER BY cg.id DESC""",(uid,uid,uid,uid)).fetchall()
     social_groups=conn.execute("""SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name""",(uid,)).fetchall()
     conn.close(); return render_template("chat_groups.html",groups=groups,social_groups=social_groups,csrf=csrf_token())
 
@@ -3232,97 +3251,89 @@ def view_profile(user_id):
         # Personal information update
         # -------------------------------------------------
 
-        elif form_identifier == "personal_info":
-
-            username = request.form.get(
-                "username",
-                ""
-            ).strip()
-
-            age = request.form.get("age")
-
-            nickname = request.form.get(
-                "nickname",
-                ""
-            ).strip()
-
-            partner = request.form.get(
-                "partner",
-                ""
-            ).strip()
-
-            status = request.form.get(
-                "relationship_status",
-                "Single"
-            )
-
-            old_values = {
-                "username": profile["username"],
-                "age": profile["age"],
-                "nickname": profile["nickname"],
-                "partner": profile["partner"],
-                "relationship_status":
-                    profile["relationship_status"]
-            }
-
-            try:
-                duplicate = conn.execute("SELECT id FROM users WHERE lower(username)=? AND id!=?", (username.lower(), user_id)).fetchone() if username else None
-                if duplicate:
-                    raise ValueError("That username is already in use.")
-                conn.execute(
-                    """UPDATE users SET username=?, age=?, nickname=?, partner=?, relationship_status=? WHERE id=?""",
-                    (username, age if age else None, nickname, partner, status, user_id)
-                )
-                conn.commit()
-            except Exception as exc:
-                conn.rollback()
-                flash(f"Profile update failed: {exc}", "error")
-                conn.close()
-                return redirect(url_for("view_profile", user_id=user_id))
-
-            changes = []
-
+        elif form_identifier in {"personal_info", "public_info"}:
+            username = request.form.get("username", "").strip().lower()
+            name = request.form.get("name", profile["name"]).strip()
+            gmail = request.form.get("gmail", profile["gmail"]).strip().lower()
+            age = request.form.get("age") or None
             fields = {
-                "username": username,
-                "age": age if age else None,
-                "nickname": nickname,
-                "partner": partner,
-                "relationship_status": status
+                "name": name, "gmail": gmail, "username": username, "age": age,
+                "nickname": request.form.get("nickname", "").strip(),
+                "partner": request.form.get("partner", "").strip(),
+                "relationship_status": request.form.get("relationship_status", "Single").strip(),
+                "phone": normalize_phone(request.form.get("phone", profile["phone"] or "")),
+                "location": request.form.get("location", profile["location"] or "").strip(),
+                "birth_date": request.form.get("birth_date", profile["birth_date"] or "").strip(),
+                "headline": request.form.get("headline", profile["headline"] or "").strip(),
+                "occupation": request.form.get("occupation", profile["occupation"] or "").strip(),
+                "company": request.form.get("company", profile["company"] or "").strip(),
+                "website": request.form.get("website", profile["website"] or "").strip(),
+                "bio": request.form.get("bio", profile["bio"] or "").strip(),
+                "education": request.form.get("education", profile["education"] or "").strip(),
+                "skills": request.form.get("skills", profile["skills"] or "").strip(),
+                "experience": request.form.get("experience", profile["experience"] or "").strip(),
+                "achievements": request.form.get("achievements", profile["achievements"] or "").strip(),
+                "interests": request.form.get("interests", profile["interests"] or "").strip(),
+                "projects": request.form.get("projects", profile["projects"] or "").strip(),
+                "certifications": request.form.get("certifications", profile["certifications"] or "").strip(),
+                "references_text": request.form.get("references_text", profile["references_text"] or "").strip(),
+                "career_objective": request.form.get("career_objective", profile["career_objective"] or "").strip(),
+                "study_status": request.form.get("study_status", profile["study_status"] or "").strip(),
+                "department": request.form.get("department", profile["department"] or "").strip(),
+                "academic_year": request.form.get("academic_year", profile["academic_year"] or "").strip(),
+                "semester": request.form.get("semester", profile["semester"] or "").strip(),
+                "student_id": request.form.get("student_id", profile["student_id"] or "").strip(),
+                "university": request.form.get("university", profile["university"] or "").strip(),
+                "profile_view": request.form.get("profile_view", profile["profile_view"] or "facebook").strip().lower()
             }
-
-            for field, new_value in fields.items():
-
-                if old_values[field] != new_value:
-
-                    changes.append(
-                        f"{field}: "
-                        f"'{old_values[field]}' → "
-                        f"'{new_value}'"
-                    )
-
-            if changes:
-
-                log_activity(
-                    "UPDATE",
-                    (
-                        f"Updated profile '{profile['name']}'. "
-                        f"Changes: "
-                        f"{'; '.join(changes)}"
-                    ),
-                    user_id
-                )
-
-                flash(
-                    "Profile information updated.",
-                    "success"
-                )
-
+            if fields["profile_view"] not in ("facebook", "cv"):
+                fields["profile_view"] = "facebook"
+            if not fields["name"] or not fields["username"] or not fields["gmail"]:
+                flash("Name, username and Gmail are required.", "error")
+            elif not valid_gmail(fields["gmail"]):
+                flash("Please enter a valid Gmail address ending in @gmail.com.", "error")
+            elif fields["phone"] and not valid_phone(fields["phone"]):
+                flash("Please enter a valid international phone number.", "error")
+            elif conn.execute("SELECT id FROM users WHERE (lower(username)=? OR lower(gmail)=? OR phone=?) AND id!=?", (fields["username"], fields["gmail"], fields["phone"], user_id)).fetchone():
+                flash("That username, Gmail or phone number is already in use.", "error")
             else:
+                keys=list(fields)
+                old_values={k:profile[k] for k in keys}
+                try:
+                    conn.execute("UPDATE users SET " + ",".join(f"{k}=?" for k in keys) + " WHERE id=?", tuple(fields[k] for k in keys)+(user_id,))
+                    conn.commit()
+                    changes=[f"{k}: '{old_values[k]}' → '{fields[k]}'" for k in keys if old_values[k]!=fields[k]]
+                    if changes:
+                        log_activity("UPDATE", f"Updated public profile '{profile['name']}'. Changes: {'; '.join(changes)}", user_id)
+                        flash("Public profile information updated successfully.", "success")
+                    else:
+                        flash("No profile information was changed.", "info")
+                except Exception as exc:
+                    conn.rollback()
+                    flash(f"Profile update failed: {exc}", "error")
 
-                flash(
-                    "No profile information was changed.",
-                    "info"
-                )
+        elif form_identifier == "admin_media":
+            photo=request.files.get("photo"); cover=request.files.get("cover_photo"); changed=[]
+            try:
+                if photo and photo.filename:
+                    if not allowed_file(photo.filename) or not validate_image_signature(photo): raise ValueError("Invalid profile image format.")
+                    new_name=generate_unique_filename(photo.filename,prefix="profile"); new_path=os.path.join(app.config["UPLOAD_FOLDER"],new_name); photo.save(new_path)
+                    old_photo=profile["photo"]; conn.execute("UPDATE users SET photo=? WHERE id=?",(new_name,user_id)); changed.append("profile photo")
+                    if old_photo and old_photo!="default_profile.png":
+                        try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"],old_photo))
+                        except OSError: pass
+                if cover and cover.filename:
+                    if not allowed_file(cover.filename) or not validate_image_signature(cover): raise ValueError("Invalid cover photo format.")
+                    new_cover=generate_unique_filename(cover.filename,prefix="cover"); cover_path=os.path.join(app.config["UPLOAD_FOLDER"],new_cover); cover.save(cover_path)
+                    old_cover=profile["cover_photo"]; conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(new_cover,user_id)); create_media_update_post(conn,user_id,cover_path,"updated their cover photo."); changed.append("cover photo")
+                    if old_cover and old_cover!=new_cover:
+                        try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"],old_cover))
+                        except OSError: pass
+                conn.commit()
+                flash("Profile media updated successfully.","success") if changed else flash("No media was selected.","info")
+                if changed: log_activity("UPDATE_MEDIA",f"Updated {', '.join(changed)} for profile '{profile['name']}'.",user_id)
+            except Exception as exc:
+                conn.rollback(); flash(f"Profile media update failed: {exc}","error")
 
         # -------------------------------------------------
         # Gallery upload

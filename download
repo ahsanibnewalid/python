@@ -1,18 +1,2 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-.env
-.env.*
-!.env.example
-database.db
-database.db-*
-static/uploads/*
-!static/uploads/.gitkeep
-private_media/posts/*
-!private_media/posts/.gitkeep
-.pytest_cache/
-.coverage
-
-.flask_secret_key
+# Auto detect text files and perform LF normalization
+* text=auto
