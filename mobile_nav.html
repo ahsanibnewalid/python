@@ -9,7 +9,7 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
 </style>
 <div class="mobile-more-backdrop" id="mobileMoreBackdrop" onclick="toggleMobileMore(false)"></div>
 <div class="mobile-more-sheet" id="mobileMoreSheet">
-<a href="{{ url_for('campus_services') }}">🏫 <span>Campus Services</span></a><a href="{{ url_for('groups_page') }}">👥 <span>Groups</span></a><a href="{{ url_for('my_profile') }}">👤 <span>Profile / CV</span></a><a href="{{ url_for('profile_settings') }}">⚙️ <span>Profile & Study Settings</span></a><a href="{{ url_for('appearance_settings') }}">🎨 <span>Appearance</span></a><a href="{{ url_for('user_home') }}#people">🔎 <span>Find Students</span></a><a href="{{ url_for('user_logout') }}">↪️ <span>Log Out</span></a>
+<a href="{{ url_for('campus_services') }}">🏫 <span>Campus Services</span></a><a href="{{ url_for('groups_page') }}">👥 <span>Groups</span></a><a href="{{ url_for('reels_page') }}">▣ <span>Reels</span></a><a href="{{ url_for('my_profile') }}">👤 <span>Profile / CV</span></a><a href="{{ url_for('profile_settings') }}">⚙️ <span>Profile & Study Settings</span></a><a href="{{ url_for('appearance_settings') }}">🎨 <span>Appearance</span></a><a href="{{ url_for('user_home') }}#people">🔎 <span>Find Students</span></a><a href="{{ url_for('user_logout') }}">↪️ <span>Log Out</span></a>
 </div>
 
 <style>
@@ -30,8 +30,9 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
 </script>
 <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
 <a class="{% if request.endpoint == 'user_home' %}active{% endif %}" href="{{ url_for('user_home') }}"><span class="mobile-icon">⌂</span><span>Home</span></a>
+<a class="{% if request.endpoint == 'reels_page' %}active{% endif %}" href="{{ url_for('reels_page') }}"><span class="mobile-icon">▣</span><span>Reels</span></a>
 <a href="{{ url_for('user_home') }}#people"><span class="mobile-icon">♙</span><span>Network</span></a>
-<a class="{% if request.endpoint in ['messages','chat'] %}active{% endif %}" href="{{ url_for('messages') }}"><span class="mobile-icon">◉</span>{% if unread_count|default(0) %}<span class="mobile-badge">{{ unread_count }}</span>{% endif %}<span>Messages</span></a>
-<button type="button" onclick="toggleMobileMore()"><span class="mobile-icon">⋮</span><span>More</span></button>
+<a class="{% if request.endpoint in ['messages','chat','chat_groups_page','chat_group'] %}active{% endif %}" href="{{ url_for('messages') }}"><span class="mobile-icon">◉</span>{% if unread_count|default(0) %}<span class="mobile-badge">{{ unread_count }}</span>{% endif %}<span>Messages</span></a>
+<button type="button" onclick="toggleMobileMore()"><span class="mobile-icon">☰</span><span>Menu</span></button>
 </nav>
 <script>function toggleMobileMore(force){const s=document.getElementById('mobileMoreSheet'),b=document.getElementById('mobileMoreBackdrop');if(!s||!b)return;const o=typeof force==='boolean'?force:!s.classList.contains('open');s.classList.toggle('open',o);b.classList.toggle('open',o)}document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleMobileMore(false)})</script>

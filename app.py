@@ -1360,6 +1360,10 @@ def user_home():
         (user_id, user_id, user_id, user_id, user_id, user_id, user_id, user_id)
     ).fetchall()
 
+    joined_groups = conn.execute("""SELECT g.id,g.name,(SELECT COUNT(*) FROM group_members gm2 WHERE gm2.group_id=g.id) member_count
+        FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name LIMIT 8""", (user_id,)).fetchall()
+    joined_chat_groups = conn.execute("""SELECT cg.id,cg.name,(SELECT COUNT(*) FROM chat_group_members cm2 WHERE cm2.chat_group_id=cg.id) member_count
+        FROM chat_groups cg JOIN chat_group_members cm ON cm.chat_group_id=cg.id WHERE cm.user_id=? ORDER BY cg.name LIMIT 8""", (user_id,)).fetchall()
     posts = fetch_feed(conn, user_id, 0, 8)
     feed_posts = serialize_posts(conn, posts, user_id)
     stories = serialize_stories(conn, fetch_stories(conn, user_id))
@@ -1376,6 +1380,8 @@ def user_home():
         search=search,
         feed_posts=feed_posts,
         stories=stories,
+        joined_groups=joined_groups,
+        joined_chat_groups=joined_chat_groups,
         csrf=csrf_token()
     )
 
@@ -1403,6 +1409,34 @@ def fetch_feed(conn, user_id, offset=0, limit=8):
         LIMIT ? OFFSET ?
         """, (user_id, *uni_params, limit, offset)
     ).fetchall()
+
+
+def fetch_reels(conn, user_id, offset=0, limit=12):
+    current = conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
+    uni_clause, uni_params = same_university_clause(current, "u")
+    return conn.execute(
+        f"""
+        SELECT p.*, u.name, u.username, u.photo,
+               (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS like_count,
+               (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) AS comment_count,
+               EXISTS(SELECT 1 FROM post_likes me WHERE me.post_id=p.id AND me.user_id=?) AS liked_by_me
+        FROM posts p JOIN users u ON u.id=p.user_id
+        WHERE p.post_type='reel' {uni_clause}
+        ORDER BY p.id DESC LIMIT ? OFFSET ?
+        """, (user_id, *uni_params, limit, offset)
+    ).fetchall()
+
+
+@app.route("/reels")
+def reels_page():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    conn = get_db_connection()
+    posts = fetch_reels(conn, session["user_id"], 0, 20)
+    reels = serialize_posts(conn, posts, session["user_id"])
+    current_user = conn.execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
+    conn.close()
+    return render_template("reels.html", current_user=current_user, reels=reels, csrf=csrf_token(), site_name=get_site_name())
 
 
 def fetch_user_posts(conn, profile_user_id, limit=20, offset=0):
@@ -1548,6 +1582,36 @@ def private_story_media(token):
     path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
     if not os.path.isfile(path): abort(404)
     return send_file(path, conditional=True, max_age=0)
+
+
+@app.route("/stories/<int:story_id>/delete", methods=["POST"])
+def delete_story(story_id):
+    wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", "")
+    if not user_required():
+        return (jsonify({"error": "login_required"}), 401) if wants_json else redirect(url_for("user_login"))
+    require_csrf()
+    conn = get_db_connection()
+    story = conn.execute("SELECT id, user_id, media_token, original_name FROM stories WHERE id=?", (story_id,)).fetchone()
+    if not story:
+        conn.close()
+        return (jsonify({"error": "story_not_found"}), 404) if wants_json else redirect(url_for("user_home"))
+    if int(story["user_id"]) != int(session["user_id"]):
+        conn.close()
+        return (jsonify({"error": "not_allowed"}), 403) if wants_json else redirect(url_for("user_home"))
+    try:
+        remove_private_media(story["media_token"], story["original_name"])
+        conn.execute("DELETE FROM stories WHERE id=? AND user_id=?", (story_id, session["user_id"]))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        app.logger.exception("Story deletion failed")
+        return (jsonify({"error": "story_delete_failed"}), 500) if wants_json else redirect(url_for("user_home"))
+    conn.close()
+    if wants_json:
+        return jsonify({"ok": True, "story_id": story_id})
+    flash("Story deleted.", "success")
+    return redirect(url_for("user_home"))
 
 
 @app.route("/api/stories")
