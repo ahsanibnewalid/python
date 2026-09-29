@@ -2770,7 +2770,7 @@ def chat_group_visible(conn, group_id, user_id):
     if not group: return None, False
     tenant=conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
     if not tenant or group["university_id"] is None or tenant["university_id"] != group["university_id"]:
-        return group, False
+        return None, False
     member=bool(chat_group_member(conn, group_id, user_id))
     if not member and group["privacy"]=="linked" and group["source_group_id"]:
         if conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],user_id)).fetchone():
