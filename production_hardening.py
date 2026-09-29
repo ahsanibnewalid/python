@@ -57,6 +57,27 @@ def install(app, get_db_connection, admin_username):
                 return redirect(request.url.replace("http://", "https://", 1), code=308)
         if not _same_origin():
             abort(403)
+
+        current_user_id = session.get("user_id")
+        if current_user_id and session.get("logged_in") is not True:
+            target_user_id = None
+            if request.view_args:
+                target_user_id = request.view_args.get("user_id")
+            if target_user_id is None and request.method in {"POST", "PUT", "PATCH"}:
+                target_user_id = request.form.get("receiver_id", type=int)
+                if target_user_id is None and request.is_json:
+                    payload = request.get_json(silent=True) or {}
+                    try:
+                        target_user_id = int(payload.get("receiver_id")) if payload.get("receiver_id") else None
+                    except (TypeError, ValueError):
+                        target_user_id = None
+            if target_user_id is not None:
+                conn = get_db_connection()
+                try:
+                    require_same_tenant(conn, current_user_id, target_user_id)
+                finally:
+                    conn.close()
+
         if _rate_limited():
             response = jsonify(error="Too many requests. Please try again later.")
             response.status_code = 429
