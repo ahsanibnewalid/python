@@ -1186,21 +1186,6 @@ def install(app, get_db_connection, require_csrf):
         conn.close()
         return jsonify({"departments":[dict(x) for x in rows]})
 
-    @bp.post("/institutions/<int:institution_id>/departments")
-    def create_department(institution_id):
-        login_required(); require_csrf()
-        if not can_institution(user_id(),institution_id,"department.manage"):
-            return json_error("Department management permission required.",403)
-        data=body(); name=str(data.get("name","")).strip()
-        if not name: return json_error("Department name is required.")
-        conn=get_db_connection()
-        cur=conn.execute(
-            "INSERT INTO departments(university_id,name,code,description) VALUES(?,?,?,?)",
-            (institution_id,name,data.get("code",""),data.get("description",""))
-        )
-        conn.commit(); did=cur.lastrowid; conn.close()
-        return created({"id":did,"name":name})
-
     @bp.post("/institutions/<int:institution_id>/members/<int:member_user_id>")
     def assign_institution_role(institution_id,member_user_id):
         login_required(); require_csrf()
