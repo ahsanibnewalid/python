@@ -26,7 +26,7 @@ html[data-theme="dark"] .empty{color:#aebdce}
 @media(max-width:760px){.top{height:auto;padding:10px 12px;gap:8px}.top .actions .print{display:none}.wrap{margin:8px auto;padding:0 0 35px}.profile{border-radius:0}.cover{height:190px}.identity{padding:0 14px 14px;align-items:center;gap:12px;flex-wrap:wrap}.avatar{width:105px;height:105px;margin-top:-48px;border-width:4px}.identity-main{padding-top:4px;flex:1}.identity h1{font-size:23px}.cover-form{width:100%;padding:0}.cover-form .btn{width:100%}.tabs{overflow:auto;padding:0 5px}.tab{padding:13px 12px;white-space:nowrap}.body{display:block;margin-top:8px}.card{border-radius:0;margin-bottom:8px;box-shadow:none}.gallery{grid-template-columns:repeat(3,1fr)}.info-grid{grid-template-columns:1fr}.top .btn{padding:8px 10px;font-size:12px}}
 </style>
 </head>
-<body>
+<body class="uc-screen-profile">
 {% include 'return_nav.html' %}
 <nav class="top"><a class="btn light" href="{{ url_for('user_home') }}">← Home</a><div class="actions">{% if is_own %}<a class="btn light" href="{{ url_for('profile_settings') }}">⚙ Edit Profile</a>{% else %}<a class="btn" href="{{ url_for('chat', user_id=profile['id']) }}">💬 Message</a>{% endif %}<button class="btn print" type="button" onclick="window.print()">🖨 Print</button></div></nav>
 <main class="wrap">
