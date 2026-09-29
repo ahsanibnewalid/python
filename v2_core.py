@@ -721,11 +721,11 @@ def install(app, get_db_connection, require_csrf):
         return created({"course_id":course_id,"user_id":target})
 
     @bp.get("/study-resources")
-    def list_study_resources():
+    def list_study_resources(forced_course_id=None):
         login_required()
         uid = user_id()
         q = str(request.args.get("q", "")).strip()
-        course_id = request.args.get("course_id")
+        course_id = forced_course_id or request.args.get("course_id")
         resource_type = str(request.args.get("resource_type", "")).strip()
         like = "%" + q + "%"
         conn = get_db_connection()
@@ -755,16 +755,7 @@ def install(app, get_db_connection, require_csrf):
 
     @bp.get("/courses/<int:course_id>/resources")
     def course_study_resources(course_id):
-        login_required()
-        q = str(request.args.get("q", "")).strip()
-        resource_type = str(request.args.get("resource_type", "")).strip()
-        with_args = {}
-        if q: with_args["q"] = q
-        if resource_type: with_args["resource_type"] = resource_type
-        # Reuse the global listing while forcing this course.
-        request.args = request.args.copy()
-        request.args["course_id"] = str(course_id)
-        return list_study_resources()
+        return list_study_resources(course_id)
 
     @bp.get("/study-resources/<int:resource_id>")
     def study_resource_detail(resource_id):
@@ -823,6 +814,8 @@ def install(app, get_db_connection, require_csrf):
         if not title:
             conn.close(); return json_error("Resource title is required.")
         resource_url=str(data.get("resource_url","")).strip()
+        if resource_url and urlparse(resource_url).scheme not in {"http","https"}:
+            conn.close(); return json_error("Resource URL must use http or https.")
         file_path=""; original_filename=""
         uploaded=request.files.get("file")
         if uploaded and uploaded.filename:
