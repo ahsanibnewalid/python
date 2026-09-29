@@ -151,6 +151,28 @@ async function renderImage(){
  draw();return new Promise((resolve,reject)=>qs("#mediaEditorCanvas").toBlob(b=>b?resolve(new File([b],"edited-photo.jpg",{type:"image/jpeg"})):reject(new Error("Could not render the edited photo.")),"image/jpeg",.92))
 }
 function setProgress(v){const p=qs("#mediaEditorProgress"),bar=p?.querySelector("span");if(p){p.style.display="block";if(bar)bar.style.width=(v*100)+"%";}}
+async function renderPhotoWithAudio(){
+ if(!state.canvas||!window.MediaRecorder||!state.canvas.captureStream)throw new Error("This browser cannot create a photo video with audio. Please use a current Chrome, Edge, or Firefox browser.");
+ const track=await getAudioTrack();if(!track||!state.audioEl)throw new Error("No audio track was found.");
+ const stream=state.canvas.captureStream(30);stream.addTrack(track);
+ const mime=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"].find(t=>MediaRecorder.isTypeSupported(t));
+ if(!mime)throw new Error("This browser cannot export photo audio.");
+ const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:1200000});
+ const chunks=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ const done=new Promise((resolve,reject)=>{rec.onstop=()=>resolve(new Blob(chunks,{type:mime}));rec.onerror=e=>reject(e.error||new Error("Photo audio export failed."))});
+ const duration=Math.min(state.audioEl.duration||15,60);
+ state.audioEl.currentTime=0;state.audioEl.muted=false;await state.audioEl.play();
+ rec.start(250);const started=performance.now();let raf=0;
+ function frame(){
+   const elapsed=(performance.now()-started)/1000;draw();setProgress(clamp(elapsed/duration,0,1));
+   if(elapsed>=duration){cancelAnimationFrame(raf);if(rec.state!=="inactive")rec.stop();state.audioEl.pause();return}
+   raf=requestAnimationFrame(frame)
+ }
+ frame();
+ const blob=await done;stream.getTracks().forEach(t=>t.stop());if(state.audioStream)state.audioStream.getTracks().forEach(t=>t.stop());
+ if(blob.size>58*1024*1024)throw new Error("Edited media is too large. Please use shorter audio.");
+ return new File([blob],"photo-with-audio.webm",{type:"video/webm"});
+}
 async function renderVideo(){
  if(!state.video||!state.canvas||!state.canvas.captureStream||!window.MediaRecorder) throw new Error("Video editing is not supported by this browser. Try a current Chrome or Edge browser.");
  const v=state.video,c=state.canvas,ctx=state.ctx;
@@ -174,9 +196,9 @@ async function renderVideo(){
 async function prepareFormData(form,fieldName){
  const fd=new FormData(form);
  if(!state.file||!state.kind)return fd;
- if(!state.dirty)return fd;
+ if(!state.dirty&&!state.audioFile)return fd;
  setProgress(0);
- const needsRender=state.dirty||!!state.audioFile; if(!needsRender)return fd;\n const edited=state.kind==="image"?await renderImage(true):await renderVideo();
+ const needsRender=state.dirty||!!state.audioFile; if(!needsRender)return fd;\n const edited=state.kind==="image"?(state.audioFile?await renderPhotoWithAudio():await renderImage(false)):await renderVideo();
  fd.delete(fieldName);fd.append(fieldName,edited,edited.name);return fd;
 }
 function attachInput(){
