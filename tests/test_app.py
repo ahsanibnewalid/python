@@ -138,3 +138,44 @@ def test_open_chat_group_create_and_join():
     conn=app.get_db_connection(); gid=conn.execute('SELECT id FROM chat_groups WHERE name=?',('Study Chat',)).fetchone()['id']; conn.close()
     login_user(client,b); assert client.post(f'/chat-groups/{gid}/join',headers={'X-CSRF-Token':'test-csrf'}).status_code==200
     r=client.post(f'/chat-groups/{gid}/send',data={'message':'Hello group','csrf_token':'test-csrf'},headers={'X-Requested-With':'XMLHttpRequest'}); assert r.status_code==200
+
+
+def test_admin_login_recovers_from_stale_csrf_session():
+    client = app.app.test_client()
+
+    page = client.get("/login")
+    assert page.status_code == 200
+
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "stale-token"
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "test-password",
+            "csrf_token": "old-token",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+
+    fresh = client.get("/login")
+    assert fresh.status_code == 200
+
+    import re
+    match = re.search(rb'name="csrf_token" value="([^"]+)"', fresh.data)
+    assert match
+
+    login = client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "test-password",
+            "csrf_token": match.group(1).decode(),
+        },
+        follow_redirects=False,
+    )
+    assert login.status_code == 302
+    assert login.headers["Location"].endswith("/")
