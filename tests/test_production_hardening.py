@@ -2,6 +2,10 @@ import app
 from werkzeug.security import generate_password_hash
 
 def _user(conn, name, username, university_id):
+    conn.execute(
+        "INSERT OR IGNORE INTO universities(id,name,created_at) VALUES(?,?,?)",
+        (university_id, f"Test University {university_id}", "2026-01-01 00:00:00"),
+    )
     cur = conn.execute(
         "INSERT INTO users(name,gmail,photo,username,password_hash,university_id) VALUES(?,?,?,?,?,?)",
         (name, username + "@gmail.com", "default_profile.png", username, generate_password_hash("password"), university_id),
