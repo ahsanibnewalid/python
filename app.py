@@ -1065,11 +1065,10 @@ def login():
         except Exception as exc:
             from werkzeug.exceptions import BadRequest
             if isinstance(exc, BadRequest) and "Invalid security token" in str(exc.description):
-                session.pop("csrf_token", None)
-                response = make_response(render_template(
-                    "login.html",
-                    error="Your login page expired. Please try again."
-                ), 400)
+                # Drop the stale session so the redirected GET creates a
+                # completely fresh CSRF token and session cookie.
+                session.clear()
+                response = redirect(url_for("login"))
                 response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
                 response.headers["Pragma"] = "no-cache"
                 return response
