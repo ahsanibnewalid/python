@@ -46,6 +46,17 @@ class PlatformV2StaticTests(unittest.TestCase):
         for marker in ("Jobs", "My CV", "Applications", "Messages", "Notifications", "Manage"):
             self.assertIn(marker, text)
 
+
+    def test_session_secret_is_stable_for_multi_worker_development(self):
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("FLASK_SECRET_KEY", app_source)
+        self.assertIn(".flask_dev_session_secret", app_source)
+        self.assertIn("app.secret_key = _dev_secret", app_source)
+        self.assertNotIn(
+            "app.secret_key = FLASK_SECRET_KEY or secrets.token_hex(32)",
+            app_source,
+        )
+
     def test_no_external_social_network_integrations(self):
         forbidden = ("facebook", "whatsapp", "messenger", "tiktok", "wechat")
         lowered = self.source.lower()
