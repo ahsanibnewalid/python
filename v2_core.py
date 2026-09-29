@@ -797,6 +797,21 @@ def install(app, get_db_connection, require_csrf):
         conn.commit(); conn.close()
         return created({"organization_id":organization_id,"user_id":target,"role":role})
 
+    @bp.get("/organizations/my-duties")
+    def my_org_duties():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT d.id,d.title,d.description,d.status,d.due_at,d.created_at,
+                      o.id organization_id,o.name organization_name
+               FROM organization_duties d JOIN organizations o ON o.id=d.organization_id
+               WHERE d.assigned_to=? AND o.status='active'
+               ORDER BY CASE WHEN d.status='assigned' THEN 0 ELSE 1 END,d.created_at DESC""",
+            (user_id(),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"duties":[dict(x) for x in rows]})
+
     @bp.get("/organizations/<int:organization_id>/office")
     def organization_office(organization_id):
         login_required()
