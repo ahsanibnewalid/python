@@ -71,7 +71,10 @@ else:
         app.secret_key = secrets.token_hex(32)
 
 STORAGE_ROOT = os.path.abspath(os.environ.get("STORAGE_ROOT", "."))
-UPLOAD_FOLDER = os.path.join(STORAGE_ROOT, "static", "uploads")
+# Public profile/gallery uploads remain under Flask's static tree so existing
+# templates keep working. On Render, mount a persistent disk directly at
+# /opt/render/project/src/static/uploads.
+UPLOAD_FOLDER = os.path.join("static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "m4v"}
