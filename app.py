@@ -2375,7 +2375,29 @@ def send_message():
         expires_at=(datetime.now()+timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
     cursor=conn.execute("""INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL)""",
                         (sender_id,receiver_id,stored_message,ciphertext,iv,encryption_version,created_at,expires_at))
-    message_id=cursor.lastrowid; conn.commit(); conn.close()
+    message_id=cursor.lastrowid
+    # Bridge direct social messages into the platform conversation inbox so
+    # Social and Workspace share the same direct-message history.
+    try:
+        direct = conn.execute("""SELECT c.id FROM conversations c
+            JOIN conversation_members m1 ON m1.conversation_id=c.id AND m1.user_id=?
+            JOIN conversation_members m2 ON m2.conversation_id=c.id AND m2.user_id=?
+            WHERE COALESCE(c.context_type,'')='' AND
+                  (SELECT COUNT(*) FROM conversation_members mx WHERE mx.conversation_id=c.id)=2
+            ORDER BY c.id DESC LIMIT 1""", (sender_id, receiver_id)).fetchone()
+        if not direct:
+            cc=conn.execute("INSERT INTO conversations(subject,context_type,context_id,created_by,created_at) VALUES(?,?,?,?,?)",("Direct message","",None,sender_id,created_at))
+            cid=cc.lastrowid
+            conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(cid,sender_id,"member",created_at))
+            conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(cid,receiver_id,"member",created_at))
+        else:
+            cid=direct[0]
+        conn.execute("INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",(cid,sender_id,stored_message,"",created_at))
+    except Exception:
+        # Keep the legacy social message working even if the compatibility
+        # bridge is unavailable on an older database.
+        pass
+    conn.commit(); conn.close()
     return jsonify({"ok":True,"message":{"id":message_id,"sender_id":sender_id,"receiver_id":receiver_id,
         "message":stored_message,"ciphertext":ciphertext,"iv":iv,"encryption_version":encryption_version,
         "created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None}})
