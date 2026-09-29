@@ -16,17 +16,18 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: python -m py_compile app.py v2_core.py
-      - run: python - <<'PY'
-import pathlib
-from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
-root = pathlib.Path("templates")
-env = Environment(loader=FileSystemLoader(str(root)))
-for path in root.rglob("*.html"):
-    try:
-        env.get_template(str(path.relative_to(root)))
-    except TemplateSyntaxError as exc:
-        raise SystemExit(f"{path}: {exc}")
-print("All templates compile.")
-PY
+      - run: |
+          python - <<'PY'
+          import pathlib
+          from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
+          root = pathlib.Path("templates")
+          env = Environment(loader=FileSystemLoader(str(root)))
+          for path in root.rglob("*.html"):
+              try:
+                  env.get_template(str(path.relative_to(root)))
+              except TemplateSyntaxError as exc:
+                  raise SystemExit(f"{path}: {exc}")
+          print("All templates compile.")
+          PY
       - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: python -c "import app; app.init_db(); print('Application imports and DB initialization succeeds.')"
