@@ -1827,5 +1827,10 @@ def activity_log():
 # Run
 # ---------------------------------------------------------
 
+# V2: independent education, organization and employment platform.
+# No external social-network API integrations are used.
+from v2_core import install as install_v2_core
+install_v2_core(app, get_db_connection, require_csrf)
+
 if __name__ == "__main__":
     app.run(debug=False)

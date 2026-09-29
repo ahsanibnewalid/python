@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>University Connect · Platform</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
+<style>
+body{margin:0;background:#f5f7fb;color:#172033;font-family:system-ui,-apple-system,sans-serif}
+.wrap{max-width:1200px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:22px}
+h1{margin:0}.muted{color:#667085}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 3px 14px #1018280a}
+.wide{grid-column:span 2}.full{grid-column:1/-1}.item{padding:12px 0;border-bottom:1px solid #edf0f4}.item:last-child{border-bottom:0}
+.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef4ff;color:#175cd3;font-size:12px;font-weight:700}
+a{color:#175cd3;text-decoration:none}.btn{display:inline-block;padding:9px 13px;background:#175cd3;color:#fff;border-radius:9px;font-weight:700}
+.search{display:flex;gap:8px}.search input{flex:1;padding:11px;border:1px solid #d0d5dd;border-radius:9px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.top{flex-direction:column;align-items:flex-start}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<div class="top">
+<div><h1>University Connect</h1><div class="muted">Education · Career · Organizations · Community</div></div>
+<div><a class="btn" href="{{ url_for('user_home') }}">Existing Home</a></div>
+</div>
+<div class="card full">
+<form class="search" action="{{ url_for('v2.platform_search') }}" method="get">
+<input name="q" placeholder="Search institutions, organizations, jobs or courses">
+<button class="btn">Search</button>
+</form>
+</div>
+<div class="grid" style="margin-top:16px">
+<section class="card"><h2>My Institutions</h2>
+{% for x in institutions %}<div class="item"><b>{{x.name}}</b><div class="muted">{{x.institution_type}} · {{x.role}}{% if x.department_name %} · {{x.department_name}}{% endif %}</div></div>{% else %}<p class="muted">No institution membership yet.</p>{% endfor %}</section>
+<section class="card"><h2>My Organizations</h2>
+{% for x in organizations %}<div class="item"><b>{{x.name}}</b><div class="muted">{{x.organization_type}} · {{x.role}}{% if x.title %} · {{x.title}}{% endif %}</div></div>{% else %}<p class="muted">No organization membership yet.</p>{% endfor %}</section>
+<section class="card"><h2>My Applications</h2>
+{% for x in applications %}<div class="item"><b>{{x.title}}</b><div class="muted">{{x.organization_name}} · <span class="pill">{{x.status}}</span></div></div>{% else %}<p class="muted">No applications yet.</p>{% endfor %}</section>
+<section class="card wide"><h2>Open Jobs</h2>
+{% for x in jobs %}<div class="item"><b>{{x.title}}</b><div class="muted">{{x.organization_name}} · {{x.location or 'Location flexible'}} · {{x.work_mode}}</div></div>{% else %}<p class="muted">No open jobs found.</p>{% endfor %}</section>
+<section class="card"><h2>Notices</h2>
+{% for x in notices %}<div class="item"><b>{{x.title}}</b><div class="muted">{{x.institution_name}} · {{x.priority}}</div></div>{% else %}<p class="muted">No notices yet.</p>{% endfor %}</section>
+</div>
+</main>
+</body></html>
