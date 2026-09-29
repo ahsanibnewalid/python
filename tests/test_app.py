@@ -179,3 +179,57 @@ def test_admin_login_recovers_from_stale_csrf_session():
     )
     assert login.status_code == 302
     assert login.headers["Location"].endswith("/")
+
+
+def test_message_notifications_are_incremental_after_cursor():
+    conn=app.get_db_connection()
+    sender=create_user(conn,"Alice","alice",1)
+    receiver=create_user(conn,"Bob","bob",1)
+    conn.execute(
+        "INSERT INTO messages(sender_id,receiver_id,message,created_at,is_read) VALUES(?,?,?,?,0)",
+        (sender,receiver,"first","2026-09-30 03:00:00")
+    )
+    conn.commit()
+    first_id=conn.execute("SELECT id FROM messages ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    conn.close()
+
+    client=app.app.test_client()
+    login_user(client,receiver)
+
+    initial=client.get("/api/message-notifications?after=0")
+    assert initial.status_code == 200
+    assert initial.get_json()["messages"]
+
+    conn=app.get_db_connection()
+    conn.execute(
+        "INSERT INTO messages(sender_id,receiver_id,message,created_at,is_read) VALUES(?,?,?,?,0)",
+        (sender,receiver,"second","2026-09-30 03:01:00")
+    )
+    conn.commit()
+    second_id=conn.execute("SELECT id FROM messages ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    conn.close()
+
+    incremental=client.get(f"/api/message-notifications?after={first_id}")
+    data=incremental.get_json()
+    assert incremental.status_code == 200
+    assert [m["id"] for m in data["messages"]] == [second_id]
+    assert data["latest_id"] == second_id
+
+
+def test_user_home_is_not_cached():
+    conn=app.get_db_connection()
+    uid=create_user(conn,"Alice","alice",1)
+    conn.commit()
+    conn.close()
+    client=app.app.test_client()
+    login_user(client,uid)
+    response=client.get("/user-home")
+    assert response.status_code == 200
+    assert "no-store" in response.headers.get("Cache-Control","").lower()
+
+
+def test_admin_profile_template_has_valid_gallery_csrf_markup():
+    template=(TEST_ROOT / "templates" / "profile.html").read_text(encoding="utf-8")
+    assert '<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">' in template
+    assert '<input type="hidden" name="form_type" value="gallery_upload">' in template
+    assert '<input\n                    type="hidden"\n                <input' not in template
