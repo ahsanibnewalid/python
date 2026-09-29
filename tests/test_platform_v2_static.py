@@ -50,8 +50,8 @@ class PlatformV2StaticTests(unittest.TestCase):
     def test_session_secret_is_stable_for_multi_worker_development(self):
         app_source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("FLASK_SECRET_KEY", app_source)
-        self.assertIn(".flask_dev_session_secret", app_source)
-        self.assertIn("app.secret_key = _dev_secret", app_source)
+        self.assertIn("DEV_SECRET_FILE", app_source)
+        self.assertIn("app.secret_key = FLASK_SECRET_KEY", app_source)
         self.assertNotIn(
             "app.secret_key = FLASK_SECRET_KEY or secrets.token_hex(32)",
             app_source,
