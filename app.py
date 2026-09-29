@@ -3125,7 +3125,7 @@ def admin_platform_universities():
                                 GROUP BY d.id ORDER BY i.name,d.name""").fetchall()
     users=conn.execute("SELECT id,name,username FROM users ORDER BY name LIMIT 500").fetchall()
     conn.close()
-    return render_template("admin_platform_universities.html",institutions=institutions,departments=departments,users=users,csrf=session.get("csrf_token",""))
+    return render_template("admin_platform_universities.html",institutions=institutions,departments=departments,users=users,csrf=csrf_token())
 
 @app.route("/admin/platform/companies", methods=["GET", "POST"])
 def admin_platform_companies():
