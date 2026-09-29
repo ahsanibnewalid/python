@@ -40,8 +40,31 @@ if APP_ENV == "production" and not FLASK_SECRET_KEY:
         "FLASK_SECRET_KEY must be set when APP_ENV=production."
     )
 
-# Development-only ephemeral key. It invalidates sessions after restart.
-app.secret_key = FLASK_SECRET_KEY or secrets.token_hex(32)
+if FLASK_SECRET_KEY:
+    app.secret_key = FLASK_SECRET_KEY
+else:
+    # Keep development sessions stable across Gunicorn workers and normal
+    # application reloads. A random key generated at import time is unsafe
+    # for a multi-worker Flask app because each worker would sign cookies
+    # with a different key, causing seemingly random logouts on navigation.
+    _dev_secret_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        ".flask_dev_session_secret",
+    )
+    try:
+        with open(_dev_secret_path, "r", encoding="utf-8") as _secret_file:
+            _dev_secret = _secret_file.read().strip()
+    except FileNotFoundError:
+        _dev_secret = secrets.token_hex(32)
+        with open(_dev_secret_path, "w", encoding="utf-8") as _secret_file:
+            _secret_file.write(_dev_secret)
+        try:
+            os.chmod(_dev_secret_path, 0o600)
+        except OSError:
+            pass
+    if not _dev_secret:
+        raise RuntimeError("Development session secret file is empty.")
+    app.secret_key = _dev_secret
 
 UPLOAD_FOLDER = os.path.join("static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
