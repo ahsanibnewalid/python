@@ -1056,7 +1056,25 @@ def login():
 
     if request.method == "POST":
 
-        require_csrf()
+        # Login pages can be cached by browsers/proxies across deployments.
+        # If that leaves an old CSRF token in the form, discard the stale
+        # session token and send the user back to a fresh login page instead
+        # of exposing a confusing generic 400 response.
+        try:
+            require_csrf()
+        except Exception as exc:
+            from werkzeug.exceptions import BadRequest
+            if isinstance(exc, BadRequest) and "Invalid security token" in str(exc.description):
+                session.pop("csrf_token", None)
+                response = make_response(render_template(
+                    "login.html",
+                    error="Your login page expired. Please try again."
+                ), 400)
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                response.headers["Pragma"] = "no-cache"
+                return response
+            raise
+
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
@@ -1075,7 +1093,10 @@ def login():
 
         error = "Invalid admin credentials. Access denied."
 
-    return render_template("login.html", error=error)
+    response = make_response(render_template("login.html", error=error))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ---------------------------------------------------------
