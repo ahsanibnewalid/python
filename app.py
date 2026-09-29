@@ -20,11 +20,13 @@ from flask import (
     jsonify,
     make_response,
     send_file,
+    send_from_directory,
     abort
 )
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from production_hardening import install as install_production_hardening, require_same_tenant
 
 
 app = Flask(__name__)
@@ -69,7 +71,11 @@ else:
         # a restart there.
         app.secret_key = secrets.token_hex(32)
 
-UPLOAD_FOLDER = os.path.join("static", "uploads")
+STORAGE_ROOT = os.path.abspath(os.environ.get("STORAGE_ROOT", "."))
+# All user media is stored under the configurable persistent storage root.
+# Templates continue to request static/uploads URLs; a small Jinja URL adapter
+# maps those media URLs to the protected storage route below.
+UPLOAD_FOLDER = os.path.join(STORAGE_ROOT, "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "m4v"}
@@ -86,10 +92,25 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
 REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
 
 DB_FILE = os.environ.get("DB_FILE", "database.db")
-PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join("private_media", "posts"))
+PRIVATE_MEDIA_FOLDER = os.path.abspath(os.environ.get("PRIVATE_MEDIA_ROOT", os.path.join(STORAGE_ROOT, "private_media", "posts")))
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
+
+
+def storage_aware_url_for(endpoint, *args, **values):
+    filename = values.get("filename", "")
+    if endpoint == "static" and filename.startswith("uploads/"):
+        return url_for("public_upload", filename=filename[len("uploads/"):])
+    return url_for(endpoint, *args, **values)
+
+
+app.jinja_env.globals["url_for"] = storage_aware_url_for
+
+
+@app.route("/media/uploads/<path:filename>")
+def public_upload(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 # ---------------------------------------------------------
@@ -410,6 +431,18 @@ def init_db():
     if "e2ee_enabled" not in chat_pref_columns:
         conn.execute("ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0")
 
+    # Ensure the tenant parent table exists before chat_groups references it.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS universities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            domain TEXT DEFAULT '',
+            logo TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,10 +451,20 @@ def init_db():
             privacy TEXT NOT NULL DEFAULT 'open',
             created_by INTEGER NOT NULL,
             source_group_id INTEGER DEFAULT NULL,
+            university_id INTEGER DEFAULT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (source_group_id) REFERENCES groups(id) ON DELETE SET NULL
+            FOREIGN KEY (source_group_id) REFERENCES groups(id) ON DELETE SET NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE SET NULL
         )
+    """)
+    chat_group_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_groups)").fetchall()}
+    if "university_id" not in chat_group_columns:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN university_id INTEGER DEFAULT NULL")
+    conn.execute("""
+        UPDATE chat_groups
+        SET university_id = (SELECT university_id FROM users WHERE users.id = chat_groups.created_by)
+        WHERE university_id IS NULL
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_group_members (
@@ -1016,7 +1059,10 @@ def log_activity(action, description, target_user_id=None):
 
 
 def admin_required():
-    return session.get("logged_in") is True
+    hardened = app.extensions.get("hardened_admin_required")
+    if hardened:
+        return hardened()
+    return session.get("logged_in") is True and session.get("admin_username") == ADMIN_USER
 
 
 def notify_user(conn, user_id, title, body):
@@ -2734,6 +2780,9 @@ def chat_group_member(conn, group_id, user_id):
 def chat_group_visible(conn, group_id, user_id):
     group=conn.execute("SELECT * FROM chat_groups WHERE id=?", (group_id,)).fetchone()
     if not group: return None, False
+    tenant=conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
+    if not tenant or group["university_id"] is None or tenant["university_id"] != group["university_id"]:
+        return None, False
     member=bool(chat_group_member(conn, group_id, user_id))
     if not member and group["privacy"]=="linked" and group["source_group_id"]:
         if conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],user_id)).fetchone():
@@ -2752,7 +2801,11 @@ def create_chat_group():
     source_group_id=request.form.get("source_group_id",type=int)
     if not name:
         flash("Chat group name is required.","error"); return redirect(url_for("messages"))
-    conn=get_db_connection(); now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn=get_db_connection()
+    user=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not user or user["university_id"] is None:
+        conn.close(); flash("Your account must be linked to a university before creating a chat group.","error"); return redirect(url_for("messages"))
+    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     members=[uid]
     privacy="open"
     if kind=="linked":
@@ -2762,7 +2815,7 @@ def create_chat_group():
         members=[r["user_id"] for r in conn.execute("SELECT user_id FROM group_members WHERE group_id=?",(source_group_id,)).fetchall()]
         if uid not in members: members.append(uid)
         privacy="linked"
-    cursor=conn.execute("INSERT INTO chat_groups(name,description,privacy,created_by,source_group_id,created_at) VALUES(?,?,?,?,?,?)",(name,description,privacy,uid,source_group_id if kind=="linked" else None,now))
+    cursor=conn.execute("INSERT INTO chat_groups(name,description,privacy,created_by,source_group_id,university_id,created_at) VALUES(?,?,?,?,?,?,?)",(name,description,privacy,uid,source_group_id if kind=="linked" else None,user["university_id"],now))
     gid=cursor.lastrowid
     for member_id in members:
         role="owner" if member_id==uid else "member"
@@ -2790,6 +2843,9 @@ def join_chat_group(group_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf(); uid=session["user_id"]; conn=get_db_connection(); group=conn.execute("SELECT * FROM chat_groups WHERE id=?",(group_id,)).fetchone()
     if not group: conn.close(); return jsonify({"error":"not_found"}),404
+    tenant=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not tenant or group["university_id"] is None or tenant["university_id"] != group["university_id"]:
+        conn.close(); return jsonify({"error":"not_allowed"}),403
     if group["privacy"]=="linked":
         if not group["source_group_id"] or not conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],uid)).fetchone():
             conn.close(); return jsonify({"error":"You must be a member of the linked UniversityConnect group."}),403
@@ -2842,10 +2898,11 @@ def chat_groups_page():
         (EXISTS(SELECT 1 FROM chat_group_members me WHERE me.chat_group_id=cg.id AND me.user_id=?)
          OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members gm WHERE gm.group_id=cg.source_group_id AND gm.user_id=?))) AS joined
         FROM chat_groups cg JOIN users u ON u.id=cg.created_by
-        WHERE cg.privacy='open'
+        WHERE cg.university_id=?
+          AND (cg.privacy='open'
            OR EXISTS(SELECT 1 FROM chat_group_members mine WHERE mine.chat_group_id=cg.id AND mine.user_id=?)
-           OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members source_member WHERE source_member.group_id=cg.source_group_id AND source_member.user_id=?))
-        ORDER BY cg.id DESC""",(uid,uid,uid,uid)).fetchall()
+           OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members source_member WHERE source_member.group_id=cg.source_group_id AND source_member.user_id=?)))
+        ORDER BY cg.id DESC""",(uid,uid,uid,uid,uid)).fetchall()
     social_groups=conn.execute("""SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name""",(uid,)).fetchall()
     conn.close(); return render_template("chat_groups.html",groups=groups,social_groups=social_groups,csrf=csrf_token())
 
@@ -3718,6 +3775,11 @@ def too_large(error):
 def server_error(error):
     return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
+
+# Install production request guards, security headers and health endpoints
+# after all core configuration is available. The helper is intentionally
+# additive and does not change the existing application routes.
+install_production_hardening(app, get_db_connection, ADMIN_USER)
 
 # ---------------------------------------------------------
 # Run
