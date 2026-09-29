@@ -1,5 +1,6 @@
 @import url("/static/professional.css");
 @import url("/static/ui-legacy-bridge.css");
+@import url("/static/university-connect.css");
 
 html[data-theme="dark"] body{background:#08111f!important;color:#f8fafc!important}
 html[data-theme="dark"] .nav,html[data-theme="dark"] .top,html[data-theme="dark"] .card,html[data-theme="dark"] .header,html[data-theme="dark"] .composer,html[data-theme="dark"] .actions-panel,html[data-theme="dark"] .messages,html[data-theme="dark"] .cv,html[data-theme="dark"] section{background:#0f1b2d!important;color:#f8fafc!important;border-color:#23334a!important}
