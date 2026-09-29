@@ -269,7 +269,8 @@ def init_db():
             age INTEGER DEFAULT NULL,
             nickname TEXT DEFAULT '',
             partner TEXT DEFAULT '',
-            relationship_status TEXT DEFAULT 'Single'
+            relationship_status TEXT DEFAULT 'Single',
+            phone TEXT DEFAULT ''
         )
     """)
 
@@ -1185,31 +1186,46 @@ def register():
             return render_template("register.html")
 
         conn = get_db_connection()
-        existing = conn.execute(
-            "SELECT id FROM users WHERE lower(gmail) = ? OR lower(username) = ? OR phone = ?",
-            (gmail, username, phone)
-        ).fetchone()
-        if existing:
-            conn.close()
-            flash("That Gmail, username or phone number is already registered.", "error")
-            return render_template("register.html")
-
-        filename = "default_profile.png"
-        if file and file.filename:
-            if not allowed_file(file.filename) or not validate_image_signature(file):
-                conn.close()
-                flash("Invalid profile image format.", "error")
+        saved_filename = None
+        try:
+            existing = conn.execute(
+                "SELECT id FROM users WHERE lower(gmail) = ? OR lower(username) = ? OR phone = ?",
+                (gmail, username, phone)
+            ).fetchone()
+            if existing:
+                flash("That Gmail, username or phone number is already registered.", "error")
                 return render_template("register.html")
-            filename = generate_unique_filename(file.filename, prefix="profile")
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
 
-        cursor = conn.execute(
-            "INSERT INTO users (name, gmail, phone, photo, username, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, gmail, phone, filename, username, generate_password_hash(password))
-        )
-        user_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+            filename = "default_profile.png"
+            if file and file.filename:
+                if not allowed_file(file.filename) or not validate_image_signature(file):
+                    flash("Invalid profile image format.", "error")
+                    return render_template("register.html")
+                filename = generate_unique_filename(file.filename, prefix="profile")
+                if not filename:
+                    flash("The profile photo could not be prepared. Please try another image.", "error")
+                    return render_template("register.html")
+                file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+                saved_filename = filename
+
+            cursor = conn.execute(
+                "INSERT INTO users (name, gmail, phone, photo, username, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, gmail, phone, filename, username, generate_password_hash(password))
+            )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            if saved_filename:
+                try:
+                    os.remove(os.path.join(app.config["UPLOAD_FOLDER"], saved_filename))
+                except OSError:
+                    pass
+            app.logger.exception("Account creation failed")
+            flash("Account creation failed. Please try again. If the problem continues, contact the administrator.", "error")
+            return render_template("register.html")
+        finally:
+            conn.close()
+
         flash("Account created successfully. You can now log in with Gmail or phone number.", "success")
         return redirect(url_for("user_login"))
 
