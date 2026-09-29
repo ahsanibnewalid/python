@@ -20,6 +20,7 @@ from flask import (
     jsonify,
     make_response,
     send_file,
+    send_from_directory,
     abort
 )
 from werkzeug.utils import secure_filename
@@ -71,10 +72,10 @@ else:
         app.secret_key = secrets.token_hex(32)
 
 STORAGE_ROOT = os.path.abspath(os.environ.get("STORAGE_ROOT", "."))
-# Public profile/gallery uploads remain under Flask's static tree so existing
-# templates keep working. On Render, mount a persistent disk directly at
-# /opt/render/project/src/static/uploads.
-UPLOAD_FOLDER = os.path.join("static", "uploads")
+# All user media is stored under the configurable persistent storage root.
+# Templates continue to request static/uploads URLs; a small Jinja URL adapter
+# maps those media URLs to the protected storage route below.
+UPLOAD_FOLDER = os.path.join(STORAGE_ROOT, "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "m4v"}
@@ -95,6 +96,21 @@ PRIVATE_MEDIA_FOLDER = os.path.abspath(os.environ.get("PRIVATE_MEDIA_ROOT", os.p
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
+
+
+def storage_aware_url_for(endpoint, *args, **values):
+    filename = values.get("filename", "")
+    if endpoint == "static" and filename.startswith("uploads/"):
+        return url_for("public_upload", filename=filename[len("uploads/"):])
+    return url_for(endpoint, *args, **values)
+
+
+app.jinja_env.globals["url_for"] = storage_aware_url_for
+
+
+@app.route("/media/uploads/<path:filename>")
+def public_upload(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 # ---------------------------------------------------------
