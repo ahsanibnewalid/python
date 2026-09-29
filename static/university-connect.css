@@ -3,3 +3,157 @@
 html[data-theme="dark"] .uc-app{--uc-bg:#08111f;--uc-surface:#0f1b2d;--uc-text:#f8fafc;--uc-line:#23334a;--uc-muted:#94a3b8}.uc-app html[data-theme="dark"]{}.uc-app[data-theme="dark"] .uc-topbar{background:#0f1b2ddd}.uc-app[data-theme="dark"] .uc-search,.uc-app[data-theme="dark"] .uc-icon-btn,.uc-app[data-theme="dark"] .uc-composer-prompt,.uc-app[data-theme="dark"] .uc-composer-tools button:hover{background:#142238}.uc-app[data-theme="dark"] .uc-post,.uc-app[data-theme="dark"] .uc-card,.uc-app[data-theme="dark"] .uc-empty{background:#0f1b2d}.uc-app[data-theme="dark"] .uc-sidebar-nav a,.uc-app[data-theme="dark"] .uc-post-actions button,.uc-app[data-theme="dark"] .uc-composer-tools button{color:#dbe4f0}.uc-app[data-theme="dark"] #composerText,.uc-app[data-theme="dark"] .uc-comment-form input{background:#0b1627;color:#f8fafc;border-color:#344963}
 @media(max-width:1100px){.uc-grid{grid-template-columns:210px minmax(0,1fr)}.uc-right{display:none}.uc-topbar-inner{grid-template-columns:220px 1fr auto}.uc-mainnav{display:none}}@media(max-width:760px){.uc-container{width:100%}.uc-topbar{display:none}.uc-mobilebar{display:flex;position:sticky;top:0;z-index:100;height:58px;background:#fffffff2;backdrop-filter:blur(18px);border-bottom:1px solid var(--uc-line);align-items:center;padding:0 12px;gap:9px}.uc-mobilebar strong{font:800 15px Manrope;flex:1}.uc-mobilebar>a{font-size:19px}.uc-page{padding:0 0 78px}.uc-grid{display:block}.uc-left,.uc-right{display:none}.uc-feed{width:100%}.uc-welcome,.uc-composer,.uc-post{border-radius:0;border-left:0;border-right:0}.uc-welcome{padding:18px 15px}.uc-welcome h1{font-size:19px}.uc-feed-toolbar{padding:0 14px}.uc-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);bottom:0;left:0;right:0;height:62px;background:#fffffff7;backdrop-filter:blur(18px);border-top:1px solid var(--uc-line);z-index:200}.uc-mobile-nav a{display:grid;place-items:center;align-content:center;gap:2px;color:#64748b;font-size:18px}.uc-mobile-nav a.active{color:var(--uc-blue)}.uc-mobile-nav small{font-size:8px;font-weight:800}.uc-post-media{max-height:520px}.uc-composer-footer{flex-wrap:wrap}.uc-composer-footer span{order:3;width:100%;flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.uc-app *{scroll-behavior:auto!important;transition:none!important}}
+
+
+/* ===== Legacy screen adapters: shared University Connect product shell ===== */
+body.uc-screen-messages,body.uc-screen-chat,body.uc-screen-chat-groups,body.uc-screen-campus,
+body.uc-screen-workspace,body.uc-screen-profile,body.uc-screen-cv,body.uc-screen-admin{
+  background:#f6f8fc!important;color:#0f172a!important;
+}
+.uc-screen-messages .msg-top,.uc-screen-chat .nav,.uc-screen-chat-groups .nav,.uc-screen-campus .nav,
+.uc-screen-profile .top,.uc-screen-cv .top,.uc-screen-admin .top{
+  background:rgba(255,255,255,.92)!important;
+  border-bottom:1px solid #e2e8f0!important;
+  box-shadow:0 1px 12px rgba(15,23,42,.05)!important;
+  backdrop-filter:blur(16px)!important;
+}
+.uc-screen-messages .msg-top,.uc-screen-chat .nav,.uc-screen-chat-groups .nav,.uc-screen-campus .nav{color:#0f172a}
+.uc-screen-messages .msg-brand,.uc-screen-chat .nav strong,.uc-screen-chat-groups .nav strong,.uc-screen-campus .nav strong{
+  color:#2563eb!important;font-weight:800!important;
+}
+.uc-screen-messages .msg-mainnav a.active,.uc-screen-messages .msg-mainnav a:hover{
+  background:#eff6ff!important;color:#2563eb!important;
+}
+.uc-screen-messages .msg-sidebar,.uc-screen-messages .msg-main{
+  background:#fff!important;border-color:#e2e8f0!important;
+}
+.uc-screen-messages .conversation:hover,.uc-screen-messages .conversation.active{background:#eff6ff!important}
+.uc-screen-messages .msg-search,.uc-screen-messages .msg-searchbox,
+.uc-screen-messages .msg-actions a,.uc-screen-messages .msg-actions button{
+  background:#f8fafc!important;border:1px solid #e2e8f0!important;
+}
+.uc-screen-messages .new-chat,.uc-screen-messages .chat-groups-preview,
+.uc-screen-chat .card,.uc-screen-chat-groups .card,.uc-screen-campus .card,
+.uc-screen-workspace .card{
+  border:1px solid #e2e8f0!important;border-radius:18px!important;
+  box-shadow:0 8px 30px rgba(15,23,42,.055)!important;
+  background:#fff!important;
+}
+.uc-screen-chat .nav a,.uc-screen-chat-groups .nav a,.uc-screen-campus .nav a{
+  color:#475569!important;font-weight:700!important;
+}
+.uc-screen-chat .nav a:hover,.uc-screen-chat-groups .nav a:hover,.uc-screen-campus .nav a:hover{
+  color:#2563eb!important;background:#eff6ff!important;
+}
+.uc-screen-chat .wrap,.uc-screen-chat-groups .wrap,.uc-screen-campus .wrap,.uc-screen-workspace .wrap{
+  width:min(1260px,calc(100% - 32px))!important;max-width:none!important;margin:0 auto!important;padding:24px 0 72px!important;
+}
+.uc-screen-chat .grid,.uc-screen-chat-groups .grid,.uc-screen-campus .grid,
+.uc-screen-workspace .grid{gap:18px!important}
+.uc-screen-chat h1,.uc-screen-chat h2,.uc-screen-chat-groups h1,.uc-screen-chat-groups h2,
+.uc-screen-campus h1,.uc-screen-campus h2,.uc-screen-workspace h1,.uc-screen-workspace h2{
+  font-family:Manrope,Inter,sans-serif!important;letter-spacing:-.02em;
+}
+.uc-screen-chat input,.uc-screen-chat textarea,.uc-screen-chat select,
+.uc-screen-chat-groups input,.uc-screen-chat-groups textarea,.uc-screen-chat-groups select,
+.uc-screen-campus input,.uc-screen-campus textarea,.uc-screen-campus select,
+.uc-screen-workspace input,.uc-screen-workspace textarea,.uc-screen-workspace select{
+  border:1px solid #cbd5e1!important;border-radius:12px!important;background:#fff!important;
+}
+.uc-screen-chat button,.uc-screen-chat-groups button,.uc-screen-campus button,
+.uc-screen-workspace .btn{
+  border-radius:11px!important;background:linear-gradient(135deg,#2563eb,#6366f1)!important;
+  box-shadow:0 7px 16px rgba(37,99,235,.16)!important;
+}
+.uc-screen-campus .item,.uc-screen-chat-groups .chat-card{
+  padding:14px!important;border:1px solid #eef2f7!important;border-radius:13px!important;margin:9px 0!important;
+  background:#fbfcfe!important;
+}
+.uc-screen-campus .item:last-child{border-bottom:0!important}
+.uc-screen-profile .profile,.uc-screen-cv .cv{
+  border:1px solid #e2e8f0!important;border-radius:22px!important;
+  box-shadow:0 18px 50px rgba(15,23,42,.09)!important;
+}
+.uc-screen-profile .cover{
+  background:linear-gradient(135deg,#2563eb,#6366f1,#06b6d4)!important;
+}
+.uc-screen-profile .identity{background:#fff!important;border-color:#e2e8f0!important}
+.uc-screen-profile .avatar{box-shadow:0 8px 28px rgba(15,23,42,.12)!important}
+.uc-screen-profile .tab.active{color:#2563eb!important;border-bottom-color:#2563eb!important}
+.uc-screen-profile .card{border:1px solid #e2e8f0!important;border-radius:17px!important;box-shadow:0 5px 24px rgba(15,23,42,.045)!important}
+.uc-screen-cv .cv{overflow:hidden!important}
+.uc-screen-cv .header{background:linear-gradient(135deg,#0f172a,#1e3a8a 65%,#4338ca)!important;border-bottom-color:#60a5fa!important}
+.uc-screen-cv .headline{color:#bfdbfe!important}
+.uc-screen-workspace .top{
+  background:rgba(255,255,255,.92)!important;border-color:#e2e8f0!important;
+}
+.uc-screen-workspace .hero{
+  background:linear-gradient(135deg,#0f172a,#1d4ed8 62%,#6366f1)!important;border:0!important;
+}
+.uc-screen-workspace .tabs button.active,.uc-screen-workspace .tabs button:hover{
+  background:#eff6ff!important;color:#2563eb!important;border-color:#bfdbfe!important;
+}
+.uc-screen-admin{background:#f4f7fb!important}
+.uc-screen-admin .hero{
+  background:linear-gradient(135deg,#0f172a,#1e3a8a 70%,#4338ca)!important;border-color:#334155!important;
+}
+.uc-screen-admin .card,.uc-screen-admin .stat{
+  background:#fff!important;border-color:#e2e8f0!important;box-shadow:0 6px 24px rgba(15,23,42,.05)!important;
+}
+.uc-screen-admin th{background:#f8fafc!important;color:#64748b!important}
+.uc-screen-admin .navgrid a{background:#f8fafc!important;border-color:#e2e8f0!important;color:#0f172a!important}
+.uc-screen-admin .navgrid a:hover{background:#eff6ff!important;color:#2563eb!important;border-color:#bfdbfe!important}
+.uc-screen-admin .top a:hover{background:#eff6ff!important;color:#2563eb!important}
+
+/* dark mode for adapted screens */
+html[data-theme="dark"] body.uc-screen-messages,html[data-theme="dark"] body.uc-screen-chat,
+html[data-theme="dark"] body.uc-screen-chat-groups,html[data-theme="dark"] body.uc-screen-campus,
+html[data-theme="dark"] body.uc-screen-workspace,html[data-theme="dark"] body.uc-screen-profile,
+html[data-theme="dark"] body.uc-screen-cv,html[data-theme="dark"] body.uc-screen-admin{
+  background:#08111f!important;color:#f8fafc!important;
+}
+html[data-theme="dark"] .uc-screen-messages .msg-top,
+html[data-theme="dark"] .uc-screen-messages .msg-sidebar,
+html[data-theme="dark"] .uc-screen-chat .nav,
+html[data-theme="dark"] .uc-screen-chat-groups .nav,
+html[data-theme="dark"] .uc-screen-campus .nav,
+html[data-theme="dark"] .uc-screen-profile .top{
+  background:#0f1b2d!important;color:#f8fafc!important;border-color:#23334a!important;
+}
+html[data-theme="dark"] .uc-screen-messages .msg-main,
+html[data-theme="dark"] .uc-screen-messages .new-chat,
+html[data-theme="dark"] .uc-screen-messages .chat-groups-preview,
+html[data-theme="dark"] .uc-screen-chat .card,
+html[data-theme="dark"] .uc-screen-chat-groups .card,
+html[data-theme="dark"] .uc-screen-campus .card,
+html[data-theme="dark"] .uc-screen-workspace .card,
+html[data-theme="dark"] .uc-screen-profile .profile,
+html[data-theme="dark"] .uc-screen-profile .identity,
+html[data-theme="dark"] .uc-screen-profile .card,
+html[data-theme="dark"] .uc-screen-cv .cv,
+html[data-theme="dark"] .uc-screen-admin .card,
+html[data-theme="dark"] .uc-screen-admin .stat{
+  background:#0f1b2d!important;color:#f8fafc!important;border-color:#23334a!important;
+}
+html[data-theme="dark"] .uc-screen-profile .info,
+html[data-theme="dark"] .uc-screen-campus .item,
+html[data-theme="dark"] .uc-screen-chat-groups .chat-card,
+html[data-theme="dark"] .uc-screen-admin .navgrid a{
+  background:#142238!important;color:#f8fafc!important;border-color:#344963!important;
+}
+html[data-theme="dark"] .uc-screen-chat input,html[data-theme="dark"] .uc-screen-chat textarea,html[data-theme="dark"] .uc-screen-chat select,
+html[data-theme="dark"] .uc-screen-chat-groups input,html[data-theme="dark"] .uc-screen-chat-groups textarea,html[data-theme="dark"] .uc-screen-chat-groups select,
+html[data-theme="dark"] .uc-screen-campus input,html[data-theme="dark"] .uc-screen-campus textarea,html[data-theme="dark"] .uc-screen-campus select,
+html[data-theme="dark"] .uc-screen-workspace input,html[data-theme="dark"] .uc-screen-workspace textarea,html[data-theme="dark"] .uc-screen-workspace select{
+  background:#0b1627!important;color:#f8fafc!important;border-color:#344963!important;
+}
+html[data-theme="dark"] .uc-screen-profile .tab{color:#94a3b8!important}
+html[data-theme="dark"] .uc-screen-profile .tab.active{color:#93c5fd!important}
+html[data-theme="dark"] .uc-screen-workspace .tabs button{background:#0f1b2d!important;color:#dbe4f0!important;border-color:#344963!important}
+html[data-theme="dark"] .uc-screen-workspace .tabs button.active{background:#102b50!important;color:#93c5fd!important}
+@media(max-width:760px){
+  .uc-screen-chat .wrap,.uc-screen-chat-groups .wrap,.uc-screen-campus .wrap,.uc-screen-workspace .wrap{width:100%!important;padding:12px 10px 78px!important}
+  .uc-screen-campus .nav,.uc-screen-chat-groups .nav{padding:12px!important}
+  .uc-screen-profile .top{padding:10px 12px!important}
+  .uc-screen-profile .body{gap:10px!important}
+}
