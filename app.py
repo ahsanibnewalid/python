@@ -1387,6 +1387,14 @@ def user_home():
         FROM chat_groups cg JOIN chat_group_members cm ON cm.chat_group_id=cg.id WHERE cm.user_id=? ORDER BY cg.name LIMIT 8""", (user_id,)).fetchall()
     posts = fetch_feed(conn, user_id, 0, 8)
     feed_posts = serialize_posts(conn, posts, user_id)
+    home_reels = serialize_posts(conn, fetch_reels(conn, user_id, 0, 8), user_id)
+    study_rows = conn.execute("""SELECT r.id,r.title,r.resource_url,r.file_path,c.title course_title,i.name institution_name,u.name author_name,(SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,(SELECT COUNT(*) FROM resource_enrollments re WHERE re.resource_id=r.id AND re.status='active') enrollment_count FROM study_resources r JOIN courses c ON c.id=r.course_id JOIN departments d ON d.id=c.department_id JOIN institutions i ON i.id=d.university_id JOIN users u ON u.id=r.author_id WHERE r.status='published' AND r.resource_type='video' AND (r.visibility='public' OR r.author_id=? OR EXISTS(SELECT 1 FROM resource_enrollments re2 WHERE re2.resource_id=r.id AND re2.user_id=? AND re2.status='active') OR EXISTS(SELECT 1 FROM course_enrollments ce WHERE ce.course_id=r.course_id AND ce.user_id=? AND ce.status='active')) ORDER BY star_points DESC,r.created_at DESC LIMIT 8""", (user_id,user_id,user_id)).fetchall()
+    home_study_videos=[]
+    for r in study_rows:
+        item=dict(r)
+        item["video_src"] = item["resource_url"] or (url_for("v2.study_resource_file", resource_id=item["id"]) if item["file_path"] else "")
+        if item["video_src"]:
+            home_study_videos.append(item)
     stories = serialize_stories(conn, fetch_stories(conn, user_id))
     conn.close()
 
@@ -1400,11 +1408,33 @@ def user_home():
         recent_conversations=recent_conversations,
         search=search,
         feed_posts=feed_posts,
+        home_reels=home_reels,
+        home_study_videos=home_study_videos,
         stories=stories,
         joined_groups=joined_groups,
         joined_chat_groups=joined_chat_groups,
         csrf=csrf_token()
     )
+
+
+@app.route("/network")
+def network_page():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    user_id = session["user_id"]
+    search = request.args.get("search", "").strip()
+    conn = get_db_connection()
+    current_user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not current_user:
+        conn.close()
+        return redirect(url_for("user_login"))
+    if search:
+        like = f"%{search}%"
+        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users WHERE id!=? AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?) ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,like,like,like,like)).fetchall()
+    else:
+        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users WHERE id!=? ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,)).fetchall()
+    conn.close()
+    return render_template("network.html", current_user=current_user, users=users, search=search, csrf=csrf_token(), site_name=get_site_name())
 
 
 @app.route("/feed")
