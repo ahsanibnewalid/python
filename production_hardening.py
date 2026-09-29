@@ -59,7 +59,7 @@ def install(app, get_db_connection, admin_username):
             abort(403)
 
         current_user_id = session.get("user_id")
-        if current_user_id and session.get("logged_in") is not True:
+        if current_user_id and session.get("user_logged_in") is True:
             target_user_id = None
             if request.view_args:
                 target_user_id = request.view_args.get("user_id")
