@@ -431,6 +431,18 @@ def init_db():
     if "e2ee_enabled" not in chat_pref_columns:
         conn.execute("ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0")
 
+    # Ensure the tenant parent table exists before chat_groups references it.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS universities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            domain TEXT DEFAULT '',
+            logo TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
