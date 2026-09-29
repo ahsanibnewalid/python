@@ -4,6 +4,8 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements-production.txt
+    preDeployCommand: python -c "import app; app.init_db()"
+    autoDeployTrigger: checksPass
     startCommand: gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /health
     envVars:
