@@ -1268,7 +1268,7 @@ def user_login():
             session["user_id"] = user["id"]
             session.permanent = True
             session.modified = True
-            return redirect(url_for("user_home"))
+            return redirect(url_for("landing"))
         error = "Invalid username, Gmail, phone number or password."
     return render_template("user_login.html", error=error)
 
@@ -2982,11 +2982,24 @@ def admin_backup():
 # Dashboard
 # ---------------------------------------------------------
 
+def is_mobile_browser():
+    """Return True for phone/tablet user agents so mobile keeps the social-first home."""
+    ua = (request.headers.get("User-Agent") or "").lower()
+    return bool(re.search(r"android|iphone|ipad|ipod|mobile|tablet|windows phone", ua))
+
+
+def preferred_user_home():
+    """Workspace-first on desktop/laptop; social + reels-first on mobile."""
+    if is_mobile_browser():
+        return url_for("user_home")
+    return url_for("v2.workspace")
+
+
 @app.route("/")
 def landing():
-    """Public entry point: authenticated users land in the unified dashboard."""
+    """Authenticated users get the device-appropriate primary experience."""
     if user_required():
-        return redirect(url_for("unified_dashboard"))
+        return redirect(preferred_user_home())
     return redirect(url_for("user_login"))
 
 
@@ -2994,6 +3007,9 @@ def landing():
 def unified_dashboard():
     if not user_required():
         return redirect(url_for("user_login"))
+    # Keep the unified dashboard URL for compatibility, but make the requested
+    # device-specific home the default destination.
+    return redirect(preferred_user_home())
     uid=session["user_id"]
     conn=get_db_connection()
     current_user=conn.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
