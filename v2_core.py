@@ -709,6 +709,27 @@ def install(app, get_db_connection, require_csrf):
         conn.close()
         return jsonify({"organizations":[dict(x) for x in rows]})
 
+    @bp.get("/organizations/<int:organization_id>/public-jobs")
+    def organization_public_jobs(organization_id):
+        login_required()
+        conn = get_db_connection()
+        org = conn.execute(
+            "SELECT id,name,organization_type,industry,domain,description FROM organizations WHERE id=? AND status='active'",
+            (organization_id,)
+        ).fetchone()
+        if not org:
+            conn.close()
+            return json_error("Company not found.",404)
+        jobs = conn.execute(
+            """SELECT id,title,department,location,work_mode,employment_type,salary_min,salary_max,currency,
+                      description,requirements,skills,deadline,vacancies,created_at
+               FROM jobs WHERE organization_id=? AND status='open'
+               ORDER BY created_at DESC""",
+            (organization_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"organization":dict(org),"jobs":[dict(x) for x in jobs]})
+
     @bp.get("/organizations/mine")
     def my_organizations():
         login_required()
