@@ -81,6 +81,14 @@ def install(app, get_db_connection, require_csrf):
         conn.close()
         return bool(row and permission in ROLE_PERMISSIONS.get(row["role"], set()))
 
+    def notify(conn, target_user_id, kind, title, body="", url=""):
+        if target_user_id is None or int(target_user_id) <= 0:
+            return
+        conn.execute(
+            "INSERT INTO platform_notifications(user_id,kind,title,body,url,created_at) VALUES(?,?,?,?,?,?)",
+            (int(target_user_id), kind, title, body, url, _now()),
+        )
+
     def json_error(message, status=400):
         return jsonify({"error": message}), status
 
@@ -740,6 +748,7 @@ def install(app, get_db_connection, require_csrf):
                 "INSERT INTO application_events(application_id,actor_id,to_status,note,created_at) VALUES(?,?,?,?,?)",
                 (aid,user_id(),"applied","Application submitted.",_now())
             )
+            notify(conn, job["posted_by"], "job_application", "New job application", job["title"], "/platform/ui/workspace")
             conn.commit()
         except Exception:
             conn.rollback(); conn.close(); return json_error("You already applied for this job.")
@@ -778,6 +787,7 @@ def install(app, get_db_connection, require_csrf):
             "INSERT INTO application_events(application_id,actor_id,from_status,to_status,note,created_at) VALUES(?,?,?,?,?,?)",
             (application_id,user_id(),row["status"],new_status,data.get("note",""),_now())
         )
+        notify(conn, row["applicant_id"], "application_status", "Application status updated", new_status, "/platform/ui/workspace")
         conn.commit(); conn.close()
         return jsonify({"application_id":application_id,"status":new_status})
 
@@ -836,6 +846,12 @@ def install(app, get_db_connection, require_csrf):
             "INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",
             (conversation_id,user_id(),text,data.get("attachment_url",""),_now())
         )
+        recipients=conn.execute(
+            "SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",
+            (conversation_id,user_id())
+        ).fetchall()
+        for recipient in recipients:
+            notify(conn, recipient["user_id"], "message", "New message", text[:120], "/platform/ui/workspace")
         conn.commit(); mid=cur.lastrowid; conn.close()
         return created({"id":mid,"conversation_id":conversation_id})
 
