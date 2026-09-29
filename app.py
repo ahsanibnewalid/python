@@ -2901,6 +2901,50 @@ def chat_groups_page():
     conn.close(); return render_template("chat_groups.html",groups=groups,social_groups=social_groups,csrf=csrf_token())
 
 
+@app.route("/admin/control-center", methods=["GET", "POST"])
+def admin_control_center():
+    if not admin_required():
+        return redirect(url_for("login"))
+    conn=get_db_connection()
+    if request.method=="POST":
+        require_csrf()
+        action=request.form.get("action","").strip()
+        try:
+            if action=="delete_post":
+                pid=int(request.form.get("post_id","0"))
+                row=conn.execute("SELECT id,user_id FROM posts WHERE id=?",(pid,)).fetchone()
+                if not row: raise ValueError("Post not found.")
+                media=conn.execute("SELECT media_token,original_name FROM posts WHERE id=?",(pid,)).fetchone()
+                if media: remove_private_media(media["media_token"],media["original_name"])
+                conn.execute("DELETE FROM posts WHERE id=?",(pid,))
+                conn.commit(); log_activity("ADMIN_DELETE_POST",f"Deleted post #{pid}",row["user_id"]); flash("Post removed.","success")
+            elif action=="delete_resource":
+                rid=int(request.form.get("resource_id","0"))
+                row=conn.execute("SELECT id,title,author_id FROM study_resources WHERE id=?",(rid,)).fetchone()
+                if not row: raise ValueError("Study resource not found.")
+                title=row["title"]; author=row["author_id"]
+                conn.execute("DELETE FROM study_resources WHERE id=?",(rid,))
+                conn.commit(); log_activity("ADMIN_DELETE_RESOURCE",f"Removed study resource #{rid}: {title}",author); flash("Study resource removed.","success")
+            elif action=="close_job":
+                jid=int(request.form.get("job_id","0"))
+                row=conn.execute("SELECT title FROM jobs WHERE id=?",(jid,)).fetchone()
+                if not row: raise ValueError("Job not found.")
+                title=row["title"]; conn.execute("UPDATE jobs SET status='closed' WHERE id=?",(jid,))
+                conn.commit(); log_activity("ADMIN_CLOSE_JOB",f"Closed job #{jid}: {title}"); flash("Job closed.","success")
+            else:
+                raise ValueError("Unknown admin action.")
+        except Exception as e:
+            conn.rollback(); flash(str(e),"error")
+    stats={"users":conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],"posts":conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0],"reels":conn.execute("SELECT COUNT(*) FROM posts WHERE post_type='reel'").fetchone()[0],"messages":conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],"resources":conn.execute("SELECT COUNT(*) FROM study_resources WHERE status='published'").fetchone()[0],"resource_stars":conn.execute("SELECT COUNT(*) FROM resource_stars").fetchone()[0],"companies":conn.execute("SELECT COUNT(*) FROM organizations WHERE organization_type='company'").fetchone()[0],"jobs":conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],"open_jobs":conn.execute("SELECT COUNT(*) FROM jobs WHERE status='open'").fetchone()[0],"institutions":conn.execute("SELECT COUNT(*) FROM institutions").fetchone()[0],"reports":conn.execute("SELECT COUNT(*) FROM message_reports").fetchone()[0]}
+    recent_users=conn.execute("SELECT id,name,username,gmail,created_at FROM users ORDER BY id DESC LIMIT 12").fetchall()
+    recent_posts=conn.execute("SELECT p.id,p.post_type,p.caption,p.created_at,u.name user_name,u.id user_id FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.id DESC LIMIT 12").fetchall()
+    recent_resources=conn.execute("SELECT r.id,r.title,r.resource_type,r.created_at,u.name author_name FROM study_resources r JOIN users u ON u.id=r.author_id ORDER BY r.id DESC LIMIT 12").fetchall()
+    recent_jobs=conn.execute("SELECT j.id,j.title,j.status,o.name organization_name FROM jobs j JOIN organizations o ON o.id=j.organization_id ORDER BY j.id DESC LIMIT 12").fetchall()
+    logs=conn.execute("SELECT * FROM activity_log ORDER BY id DESC LIMIT 20").fetchall()
+    conn.close()
+    return render_template("admin_control_center.html",stats=stats,recent_users=recent_users,recent_posts=recent_posts,recent_resources=recent_resources,recent_jobs=recent_jobs,logs=logs,csrf=csrf_token())
+
+
 @app.route("/admin/analytics")
 def admin_analytics():
     if not admin_required(): return redirect(url_for("login"))
@@ -2940,14 +2984,33 @@ def admin_backup():
 
 @app.route("/")
 def landing():
-    """Public entry point: always open the user portal first.
-
-    The admin panel is deliberately not linked from the public UI.
-    Administrators must use the dedicated admin login route.
-    """
+    """Public entry point: authenticated users land in the unified dashboard."""
     if user_required():
-        return redirect(url_for("user_home"))
+        return redirect(url_for("unified_dashboard"))
     return redirect(url_for("user_login"))
+
+
+@app.route("/dashboard")
+def unified_dashboard():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    uid=session["user_id"]
+    conn=get_db_connection()
+    current_user=conn.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
+    feed=serialize_posts(conn,fetch_feed(conn,uid,0,6),uid)
+    reels=serialize_posts(conn,fetch_reels(conn,uid,0,6),uid)
+    unread=conn.execute("SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0",(uid,)).fetchone()[0]
+    notifications=conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0",(uid,)).fetchone()[0]
+    jobs=conn.execute("SELECT COUNT(*) FROM jobs WHERE status='open'").fetchone()[0]
+    cv_count=conn.execute("SELECT COUNT(*) FROM cv_documents WHERE user_id=?",(uid,)).fetchone()[0]
+    resource_count=conn.execute("SELECT COUNT(*) FROM study_resources WHERE status='published'").fetchone()[0]
+    companies=conn.execute("SELECT COUNT(*) FROM organizations WHERE organization_type='company'").fetchone()[0]
+    institutions=conn.execute("SELECT COUNT(*) FROM institutions").fetchone()[0]
+    conn.close()
+    return render_template("unified_dashboard.html",current_user=current_user,feed_posts=feed,reels=reels,
+                           unread_count=unread,notification_count=notifications,jobs_count=jobs,
+                           cv_count=cv_count,resource_count=resource_count,companies_count=companies,
+                           institutions_count=institutions,csrf=csrf_token(),site_name=get_site_name())
 
 
 @app.route("/admin", methods=["GET", "POST"])
