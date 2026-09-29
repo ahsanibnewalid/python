@@ -881,6 +881,11 @@ def inject_navigation_context():
 
 
 def require_csrf():
+    """Validate CSRF for normal forms, multipart uploads, JSON and AJAX requests.
+
+    Keep the token lookup deliberately broad because the platform uses both
+    native forms and fetch/FormData for writes.
+    """
     token = (
         request.form.get("csrf_token")
         or request.headers.get("X-CSRF-Token")
@@ -891,9 +896,24 @@ def require_csrf():
             token = (request.get_json(silent=True) or {}).get("csrf_token")
         except Exception:
             token = None
-    expected = session.get("csrf_token", "")
-    if not token or not expected or not secrets.compare_digest(str(token), str(expected)):
-        abort(400, description="Invalid security token.")
+
+    expected = session.get("csrf_token")
+    if not expected:
+        # Pages that render forms always create this value through csrf_token().
+        # If a worker/session was restarted, create a fresh value so the user
+        # can retry instead of getting a permanent write failure.
+        expected = csrf_token()
+
+    if not token or not secrets.compare_digest(str(token), str(expected)):
+        app.logger.warning(
+            "CSRF rejected: method=%s path=%s ajax=%s has_token=%s has_session=%s",
+            request.method,
+            request.path,
+            request.headers.get("X-Requested-With") == "XMLHttpRequest",
+            bool(token),
+            bool(session.get("csrf_token")),
+        )
+        abort(400, description="Your form session expired. Refresh the page and try again.")
 
 
 def allowed_file(filename):
@@ -4023,7 +4043,10 @@ def activity_log():
 
 @app.errorhandler(400)
 def bad_request(error):
-    return render_template("error.html", code=400, title="Bad request", message=getattr(error, "description", "The request could not be processed.")), 400
+    message = getattr(error, "description", "The request could not be processed.")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.accept_mimetypes.best == "application/json":
+        return jsonify(error=message), 400
+    return render_template("error.html", code=400, title="Bad request", message=message), 400
 
 
 @app.errorhandler(403)
@@ -4038,11 +4061,17 @@ def not_found(error):
 
 @app.errorhandler(413)
 def too_large(error):
-    return render_template("error.html", code=413, title="File too large", message="The uploaded file is larger than the allowed limit."), 413
+    message = "The uploaded file is larger than the allowed 60 MB limit."
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.accept_mimetypes.best == "application/json":
+        return jsonify(error=message), 413
+    return render_template("error.html", code=413, title="File too large", message=message), 413
 
 
 @app.errorhandler(500)
 def server_error(error):
+    app.logger.exception("Unhandled request failure: %s %s", request.method, request.path)
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.accept_mimetypes.best == "application/json":
+        return jsonify(error="The server could not complete this request. Please try again."), 500
     return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
 
