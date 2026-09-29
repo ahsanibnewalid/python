@@ -114,7 +114,7 @@ async function loadResources(){
     $('resourcelist').innerHTML=rows.map(r=>{
       const access=r.visibility==='public'||r.enrolled;
       return '<div class="item"><b>📚 '+esc(r.title)+'</b> <span class="pill">'+esc(r.resource_type)+'</span> <span class="pill">⭐ '+r.star_points+'</span>'+
-        '<div class="muted">'+esc(r.course_code)+' · '+esc(r.course_title)+' · '+esc(r.institution_name)+' · By '+esc(r.author_name)+'</div>'+
+        '<div class="muted">'+esc(r.course_code)+' · '+esc(r.course_title)+' · '+esc(r.institution_name)+' · By '+esc(r.author_name)+' · '+r.enrollment_count+' enrolled</div>'+
         '<div>'+esc(r.description||'No description')+'</div>'+
         '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">'+
         (r.enrolled?'<span class="pill">Enrolled</span>':'<button class="btn" onclick="enrollResource('+r.id+')">Enroll / access</button>')+
