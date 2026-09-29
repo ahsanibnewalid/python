@@ -86,7 +86,6 @@ html[data-theme="dark"]{--bg:#18191a;--card:#242526;--text:#e4e6eb;--muted:#b0b3
 </style>
 </head>
 <body>
-<div class="mobile-head"><a class="mobile-brand" href="{{ url_for('user_home') }}">University Connect</a><a class="circle-btn" href="{{ url_for('v2.workspace') }}" title="Workspace" aria-label="Open Workspace">🧰</a><a class="mobile-search" href="{{ url_for('user_home') }}">⌕</a><button class="mobile-more" type="button" onclick="document.querySelector('.desktop-mainnav')?.classList.toggle('mobile-open')" aria-label="More">⋯</button></div>
 <header class="topbar">
   <div class="top-left"><a class="brand" href="{{ url_for('user_home') }}"><span class="brand-mark">U</span></a><form class="search" method="GET" action="{{ url_for('user_home') }}"><span class="search-icon">⌕</span><input name="search" value="{{ search }}" placeholder="Search students, groups, campus…"></form></div>
   <nav class="desktop-mainnav" aria-label="Main navigation">
@@ -104,7 +103,7 @@ html[data-theme="dark"]{--bg:#18191a;--card:#242526;--text:#e4e6eb;--muted:#b0b3
     <button class="profile-mini profile-menu-toggle" id="profileToggle" type="button" aria-expanded="false" title="Account"><img src="{{ url_for('static', filename='uploads/' + current_user['photo']) }}"><span class="profile-chevron">⌄</span></button>
   </div>
 </header>
-<header class="mobile-head"><a class="mobile-brand" href="{{ url_for('user_home') }}">{{ site_name }}</a><button class="mobile-search" type="button">⌕</button><button class="mobile-head-btn" id="mobileInbox" type="button">💬{% if unread_count %}<i class="top-badge">{{ unread_count }}</i>{% endif %}</button><button class="mobile-more" onclick="toggleMobileMore()">☰</button></header>
+<header class="mobile-head"><a class="mobile-brand" href="{{ url_for('user_home') }}">{{ site_name }}</a><a class="circle-btn" href="{{ url_for('v2.workspace') }}" title="Workspace" aria-label="Open Workspace">🧰</a><button class="mobile-search" type="button">⌕</button><button class="mobile-head-btn" id="mobileInbox" type="button">💬{% if unread_count %}<i class="top-badge">{{ unread_count }}</i>{% endif %}</button><button class="mobile-more" type="button" onclick="document.getElementById('menuToggle')?.click()" aria-label="More">☰</button></header>
 <div class="mobile-search-panel" style="display:none;padding:8px 10px;background:var(--card);border-bottom:1px solid var(--line)"><form class="search" method="GET" action="{{ url_for('user_home') }}"><span>⌕</span><input name="search" value="{{ search }}" placeholder="Search students…"></form></div>
 <div class="inbox-popover" id="inboxPopover" role="dialog" aria-label="Messages inbox" aria-hidden="true">
   <div class="inbox-popover-head"><div><strong>Messages</strong>{% if unread_count %}<span class="inbox-count">{{ unread_count }} unread</span>{% endif %}</div><a href="{{ url_for('messages') }}">See all</a></div>
