@@ -736,7 +736,7 @@ def install(app, get_db_connection, require_csrf):
         if resource_type:
             where.append("r.resource_type=?"); params.append(resource_type)
         sql = """SELECT r.id,r.course_id,r.author_id,r.title,r.description,r.resource_type,r.resource_url,
-                      r.original_filename,r.visibility,r.created_at,r.updated_at,
+                      r.original_filename,r.file_path,r.visibility,r.created_at,r.updated_at,
                       c.code course_code,c.title course_title,d.name department_name,i.id institution_id,i.name institution_name,
                       u.name author_name,
                       (SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,
