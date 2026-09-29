@@ -179,7 +179,11 @@ async function renderVideo(){
  const start=clamp(state.start,0,state.duration),end=clamp(state.end??state.duration,start+.1,state.duration);
  v.pause();v.currentTime=start;await new Promise(r=>{const f=()=>{if(Math.abs(v.currentTime-start)<.08||v.readyState>=2){v.removeEventListener("timeupdate",f);r()}else{} };v.addEventListener("timeupdate",f);setTimeout(r,500)});
  const stream=c.captureStream(30);
- try{if(v.captureStream){v.muted=false;const vs=v.captureStream();vs.getAudioTracks().forEach(t=>stream.addTrack(t))}}catch(e){}
+ const externalAudio=await getAudioTrack();
+ try{
+   if(externalAudio) stream.addTrack(externalAudio);
+   else if(v.captureStream){v.muted=false;const vs=v.captureStream();vs.getAudioTracks().forEach(t=>stream.addTrack(t))}
+ }catch(e){if(externalAudio)throw e}
  const types=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
  const mime=types.find(t=>MediaRecorder.isTypeSupported(t));if(!mime)throw new Error("This browser cannot export an edited video.");
  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:Math.min(5000000,Math.max(1200000,(c.width*c.height*30)/4))});
@@ -198,7 +202,7 @@ async function prepareFormData(form,fieldName){
  if(!state.file||!state.kind)return fd;
  if(!state.dirty&&!state.audioFile)return fd;
  setProgress(0);
- const needsRender=state.dirty||!!state.audioFile; if(!needsRender)return fd;\n const edited=state.kind==="image"?(state.audioFile?await renderPhotoWithAudio():await renderImage(false)):await renderVideo();
+ const edited=state.kind==="image"?(state.audioFile?await renderPhotoWithAudio():await renderImage(false)):await renderVideo();
  fd.delete(fieldName);fd.append(fieldName,edited,edited.name);return fd;
 }
 function attachInput(){
