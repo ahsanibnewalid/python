@@ -436,8 +436,10 @@ def install(app, get_db_connection, require_csrf):
         # One-time compatibility migration: materialize existing legacy
         # social direct messages as ordinary two-person Workspace conversations.
         pairs = conn.execute(
-            """SELECT MIN(sender_id,receiver_id) user_a, MAX(sender_id,receiver_id) user_b
-               FROM messages GROUP BY MIN(sender_id,receiver_id), MAX(sender_id,receiver_id)"""
+            """SELECT CASE WHEN sender_id < receiver_id THEN sender_id ELSE receiver_id END user_a,
+                      CASE WHEN sender_id > receiver_id THEN sender_id ELSE receiver_id END user_b
+               FROM messages GROUP BY CASE WHEN sender_id < receiver_id THEN sender_id ELSE receiver_id END,
+                                    CASE WHEN sender_id > receiver_id THEN sender_id ELSE receiver_id END"""
         ).fetchall()
         for pair in pairs:
             a_id,b_id=int(pair["user_a"]),int(pair["user_b"])
