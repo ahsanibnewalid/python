@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>University Connect Platform Workspace</title>
+<style>
+body{margin:0;font-family:Inter,system-ui,Arial;background:#f5f7fb;color:#172033}.top{position:sticky;top:0;background:#fff;border-bottom:1px solid #e5e7eb;padding:14px 20px;display:flex;gap:16px;align-items:center;justify-content:space-between;z-index:4}.top a{font-weight:800;color:#1456c4;text-decoration:none;margin-left:12px}.wrap{max-width:1250px;margin:24px auto;padding:0 14px}.hero{background:linear-gradient(135deg,#13213a,#1456c4);color:#fff;border-radius:18px;padding:24px;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card{background:#fff;border:1px solid #e7ebf2;border-radius:16px;padding:18px;box-shadow:0 4px 18px #1720330d}.wide{grid-column:1/-1}.tabs{display:flex;gap:8px;overflow:auto;margin-bottom:14px}.tabs button{white-space:nowrap}.tabs button,.btn{border:0;border-radius:9px;padding:10px 13px;background:#1456c4;color:#fff;font-weight:800;cursor:pointer}.tabs button.alt{background:#e9eef8;color:#17345f}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fields .wide{grid-column:1/-1}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #d6dce7;border-radius:9px;padding:10px;background:#fff}textarea{min-height:90px}label{font-size:12px;font-weight:800;color:#526070;display:block;margin:8px 0 5px}.item{padding:12px 0;border-top:1px solid #edf0f4}.muted{color:#667085;font-size:13px}.pill{display:inline-block;background:#eef4ff;color:#1456c4;border-radius:99px;padding:3px 8px;font-size:11px;font-weight:800;margin-right:5px}.hidden{display:none}.notice{padding:10px 12px;border-radius:9px;background:#f6f8fc;margin:8px 0}.success{color:#087443;font-weight:700}.error{color:#b42318;font-weight:700}@media(max-width:850px){.grid,.fields{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style>
+</head>
+<body>
+<header class="top"><strong>🎓 University Connect · Platform Workspace</strong><nav><a href="{{ url_for('v2.ui_dashboard') }}">Dashboard</a><a href="{{ url_for('user_home') }}">Home</a></nav></header>
+<main class="wrap">
+<section class="hero"><h1>Education · Career · Communication</h1><p>Operate institutions, courses, sessions, notices, recordings, organizations, jobs, applications, CVs and conversations from one independent platform.</p></section>
+<div id="flash"></div>
+<div class="tabs">
+<button onclick="show('jobs')">Jobs</button><button onclick="show('cv')">My CV</button><button onclick="show('applications')">Applications</button><button onclick="show('messages')">Messages</button><button onclick="show('notifications')">Notifications</button><button onclick="show('admin')">Manage</button>
+</div>
+
+<section id="jobs" class="panel">
+<div class="grid">
+<div class="card wide"><h2>Find jobs</h2><div class="fields"><input id="jobq" placeholder="Search title, skill or company"><button class="btn" onclick="loadJobs()">Search</button></div><div id="joblist"></div></div>
+<div class="card"><h2>Job details</h2><div id="jobdetail" class="muted">Select a job.</div></div>
+<div class="card"><h2>Apply</h2><form id="applyform" onsubmit="applyJob(event)"><label>Cover letter</label><textarea id="cover_letter"></textarea><label>Portfolio URL</label><input id="portfolio_url"><button class="btn">Submit application</button></form></div>
+</div>
+</section>
+
+<section id="cv" class="panel hidden"><div class="card"><h2>Professional CV</h2><form onsubmit="saveCV(event)"><div class="fields">
+<div class="wide"><label>Summary</label><textarea id="cv_summary"></textarea></div>
+<div><label>Education</label><textarea id="cv_education"></textarea></div><div><label>Experience</label><textarea id="cv_experience"></textarea></div>
+<div><label>Skills</label><textarea id="cv_skills"></textarea></div><div><label>Projects</label><textarea id="cv_projects"></textarea></div>
+<div><label>Certifications</label><textarea id="cv_certifications"></textarea></div><div><label>Achievements</label><textarea id="cv_achievements"></textarea></div>
+<div><label>Languages</label><input id="cv_languages"></div><div><label>Portfolio</label><input id="cv_portfolio"></div>
+<div><label>GitHub</label><input id="cv_github"></div><div><label>LinkedIn URL (user-entered)</label><input id="cv_linkedin"></div>
+<div class="wide"><label>CV file URL</label><input id="cv_file"></div>
+</div><button class="btn">Save CV</button></form></div></section>
+
+<section id="applications" class="panel hidden"><div class="card"><h2>My applications</h2><div id="applist"></div></div></section>
+<section id="messages" class="panel hidden"><div class="grid"><div class="card"><h2>Conversations</h2><div id="conversations"></div></div><div class="card"><h2>Conversation</h2><div id="messageslist"></div><form onsubmit="sendMessage(event)"><textarea id="messagebody" placeholder="Write a message"></textarea><button class="btn">Send</button></form></div></div></section>
+<section id="notifications" class="panel hidden"><div class="card"><h2>Notifications</h2><div id="notices"></div></div></section>
+
+<section id="admin" class="panel hidden"><div class="grid">
+<div class="card"><h2>Create institution</h2><form onsubmit="createInstitution(event)"><label>Name</label><input id="inst_name" required><label>Type</label><select id="inst_type"><option>university</option><option>college</option><option>medical</option><option>engineering</option><option>it_institute</option></select><label>Description</label><textarea id="inst_desc"></textarea><button class="btn">Create</button></form></div>
+<div class="card"><h2>Create organization</h2><form onsubmit="createOrganization(event)"><label>Name</label><input id="org_name" required><label>Industry</label><input id="org_industry"><label>Description</label><textarea id="org_desc"></textarea><button class="btn">Create</button></form></div>
+<div class="card wide"><h2>Institution / company management</h2><p class="muted">Use the dashboard's institution and organization IDs to open their operational APIs. The platform enforces capability-based roles rather than external network integrations.</p><div id="manageinfo"></div></div>
+</div></section>
+</main>
+<script>
+const csrf="{{ csrf_token() }}"; let selectedJob=null, selectedConversation=null;
+const $=id=>document.getElementById(id);
+async function api(url,opt={}){opt.headers=Object.assign({'X-CSRF-Token':csrf,'Content-Type':'application/json'},opt.headers||{});const r=await fetch(url,opt);const d=await r.json().catch(()=>({error:'Invalid response'}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
+function msg(t,err=false){$('flash').innerHTML='<div class="'+(err?'error':'success')+'">'+t+'</div>';setTimeout(()=>{$('flash').innerHTML=''},3500)}
+function show(id){document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='jobs')loadJobs();if(id==='cv')loadCV();if(id==='applications')loadApplications();if(id==='messages')loadConversations();if(id==='notifications')loadNotifications()}
+async function loadJobs(){const q=$('jobq').value.trim();const d=await api('/platform/jobs');const rows=d.jobs.filter(j=>!q||[j.title,j.organization_name,j.skills,j.description].join(' ').toLowerCase().includes(q.toLowerCase()));$('joblist').innerHTML=rows.map(j=>'<div class="item"><b>'+esc(j.title)+'</b> <span class="pill">'+esc(j.organization_name)+'</span><div class="muted">'+esc(j.location||'')+' · '+esc(j.work_mode)+' · '+esc(j.employment_type)+'</div><button class="btn" onclick="selectJob('+j.id+')">View</button></div>').join('')||'<p class="muted">No open jobs found.</p>'}
+async function selectJob(id){selectedJob=id;const d=await api('/platform/jobs/'+id);const j=d.job;$('jobdetail').innerHTML='<h3>'+esc(j.title)+'</h3><p><b>'+esc(j.organization_name)+'</b> · '+esc(j.location||'')+'</p><p>'+esc(j.description)+'</p><p><b>Requirements:</b> '+esc(j.requirements||'')+'</p><p><b>Skills:</b> '+esc(j.skills||'')+'</p><p class="muted">Deadline: '+esc(j.deadline||'Not specified')+'</p>'+(d.application?'<span class="pill">Already applied: '+esc(d.application.status)+'</span>':'');}
+async function applyJob(e){e.preventDefault();if(!selectedJob)return msg('Select a job first.',true);try{const d=await api('/platform/jobs/'+selectedJob+'/apply',{method:'POST',body:JSON.stringify({cover_letter:$('cover_letter').value,portfolio_url:$('portfolio_url').value})});msg('Application submitted. Conversation #'+d.conversation_id+' created.');loadApplications()}catch(e){msg(e.message,true)}}
+async function loadCV(){const d=await api('/platform/cv');const c=d.cv||{};[['cv_summary','summary'],['cv_education','education'],['cv_experience','experience'],['cv_skills','skills'],['cv_projects','projects'],['cv_certifications','certifications'],['cv_achievements','achievements'],['cv_languages','languages'],['cv_portfolio','portfolio_url'],['cv_github','github_url'],['cv_linkedin','linkedin_url'],['cv_file','cv_file_url']].forEach(x=>$(x[0]).value=c[x[1]]||'')}
+async function saveCV(e){e.preventDefault();const m={summary:$('cv_summary').value,education:$('cv_education').value,experience:$('cv_experience').value,skills:$('cv_skills').value,projects:$('cv_projects').value,certifications:$('cv_certifications').value,achievements:$('cv_achievements').value,languages:$('cv_languages').value,portfolio_url:$('cv_portfolio').value,github_url:$('cv_github').value,linkedin_url:$('cv_linkedin').value,cv_file_url:$('cv_file').value};try{await api('/platform/cv',{method:'POST',body:JSON.stringify(m)});msg('CV saved.')}catch(e){msg(e.message,true)}}
+async function loadApplications(){const d=await api('/platform/dashboard');$('applist').innerHTML=(d.open_jobs||[]).length?'Applications are available on the main dashboard.':'No open jobs.';const x=await fetch('/platform/ui').catch(()=>null);/* keep existing dashboard available */ }
+async function loadConversations(){const d=await api('/platform/conversations');$('conversations').innerHTML=d.conversations.map(c=>'<div class="item"><b>'+esc(c.subject||'Conversation')+'</b><div class="muted">'+esc(c.last_message||'No messages')+'</div><button class="btn" onclick="openConversation('+c.id+')">Open</button></div>').join('')||'<p class="muted">No conversations yet.</p>'}
+async function openConversation(id){selectedConversation=id;const d=await api('/platform/conversations/'+id);$('messageslist').innerHTML=d.messages.map(m=>'<div class="item"><b>'+esc(m.sender_name)+'</b><div>'+esc(m.body)+'</div><div class="muted">'+esc(m.created_at)+'</div></div>').join('')||'<p class="muted">No messages.</p>'}
+async function sendMessage(e){e.preventDefault();if(!selectedConversation)return msg('Open a conversation first.',true);try{await api('/platform/conversations/'+selectedConversation+'/messages',{method:'POST',body:JSON.stringify({body:$('messagebody').value})});$('messagebody').value='';openConversation(selectedConversation)}catch(e){msg(e.message,true)}}
+async function loadNotifications(){const d=await api('/platform/notifications');$('notices').innerHTML=d.notifications.map(n=>'<div class="notice"><b>'+esc(n.title)+'</b><div>'+esc(n.body||'')+'</div><div class="muted">'+esc(n.created_at)+'</div></div>').join('')||'<p class="muted">No notifications.</p>'}
+async function createInstitution(e){e.preventDefault();try{const d=await api('/platform/institutions',{method:'POST',body:JSON.stringify({name:$('inst_name').value,institution_type:$('inst_type').value,description:$('inst_desc').value})});msg('Institution #'+d.id+' created.')}catch(e){msg(e.message,true)}}
+async function createOrganization(e){e.preventDefault();try{const d=await api('/platform/organizations',{method:'POST',body:JSON.stringify({name:$('org_name').value,industry:$('org_industry').value,description:$('org_desc').value})});msg('Organization #'+d.id+' created.')}catch(e){msg(e.message,true)}}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+loadJobs();
+</script>
+</body></html>
