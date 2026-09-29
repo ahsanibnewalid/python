@@ -390,9 +390,11 @@ def install(app, get_db_connection, require_csrf):
             return json_error("You are not allowed to assign institution roles.", 403)
         conn = get_db_connection()
         conn.execute(
-            """INSERT OR REPLACE INTO institution_memberships
+            """INSERT INTO institution_memberships
                (institution_id,user_id,role,department_id,title,status,created_at)
-               VALUES(?,?,?,?,?,'active',?)""",
+               VALUES(?,?,?,?,?,'active',?)
+               ON CONFLICT(institution_id,user_id,role) DO UPDATE SET
+               department_id=excluded.department_id,title=excluded.title,status=excluded.status,created_at=excluded.created_at""",
             (institution_id,target,role,data.get("department_id") or None,data.get("title",""),_now())
         )
         conn.commit(); conn.close()
@@ -545,8 +547,10 @@ def install(app, get_db_connection, require_csrf):
             return json_error("You are not allowed to assign organization roles.",403)
         conn=get_db_connection()
         conn.execute(
-            """INSERT OR REPLACE INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
-               VALUES(?,?,?,?, 'active',?)""",
+            """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
+               VALUES(?,?,?,?, 'active',?)
+               ON CONFLICT(organization_id,user_id,role) DO UPDATE SET
+               title=excluded.title,status=excluded.status,created_at=excluded.created_at""",
             (organization_id,target,role,data.get("title",""),_now())
         )
         conn.commit(); conn.close()
