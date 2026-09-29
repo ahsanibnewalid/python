@@ -318,6 +318,17 @@ def install(app, get_db_connection, require_csrf):
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
                 FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
             )""",
+            """CREATE TABLE IF NOT EXISTS platform_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT DEFAULT '',
+                url TEXT DEFAULT '',
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
         ]
         for statement in statements:
             conn.execute(statement)
@@ -838,6 +849,21 @@ def install(app, get_db_connection, require_csrf):
         conn.close()
         return jsonify({"cv": dict(row) if row else {}})
 
+    @bp.get("/applications")
+    def my_applications():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT a.id,a.status,a.cover_letter,a.portfolio_url,a.created_at,a.updated_at,
+                      j.id job_id,j.title,o.name organization_name
+               FROM job_applications a JOIN jobs j ON j.id=a.job_id
+               JOIN organizations o ON o.id=j.organization_id
+               WHERE a.applicant_id=? ORDER BY a.created_at DESC""",
+            (user_id(),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"applications":[dict(x) for x in rows]})
+
     @bp.get("/jobs/<int:job_id>")
     def job_detail(job_id):
         login_required()
@@ -881,6 +907,35 @@ def install(app, get_db_connection, require_csrf):
         ).fetchall()
         conn.close()
         return jsonify({"application": dict(row), "events": [dict(x) for x in events]})
+
+    @bp.get("/organizations/<int:organization_id>/jobs")
+    def organization_jobs(organization_id):
+        login_required()
+        if not can_organization(user_id(), organization_id, "job.create") and not can_organization(user_id(), organization_id, "application.review"):
+            abort(403)
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT j.id,j.title,j.status,j.location,j.work_mode,j.employment_type,j.deadline,j.vacancies,j.created_at,
+                      COUNT(a.id) application_count
+               FROM jobs j LEFT JOIN job_applications a ON a.job_id=j.id
+               WHERE j.organization_id=? GROUP BY j.id ORDER BY j.created_at DESC""",
+            (organization_id,),
+        ).fetchall()
+        conn.close()
+        return jsonify({"jobs":[dict(x) for x in rows]})
+
+    @bp.post("/jobs/<int:job_id>/close")
+    def close_job(job_id):
+        login_required(); require_csrf()
+        conn=get_db_connection()
+        row=conn.execute("SELECT organization_id FROM jobs WHERE id=?",(job_id,)).fetchone()
+        if not row:
+            conn.close(); return json_error("Job not found.",404)
+        if not can_organization(user_id(),row["organization_id"],"job.create"):
+            conn.close(); return json_error("Job management permission required.",403)
+        conn.execute("UPDATE jobs SET status='closed',updated_at=? WHERE id=?",( _now(),job_id))
+        conn.commit(); conn.close()
+        return jsonify({"job_id":job_id,"status":"closed"})
 
     @bp.get("/organizations/<int:organization_id>/members")
     def organization_members(organization_id):
@@ -994,17 +1049,6 @@ def install(app, get_db_connection, require_csrf):
     def notifications():
         login_required()
         conn = get_db_connection()
-        conn.execute("""CREATE TABLE IF NOT EXISTS platform_notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            title TEXT NOT NULL,
-            body TEXT DEFAULT '',
-            url TEXT DEFAULT '',
-            is_read INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        )""")
         rows = conn.execute(
             """SELECT id,kind,title,body,url,is_read,created_at FROM platform_notifications
                WHERE user_id=? ORDER BY created_at DESC LIMIT 50""",
