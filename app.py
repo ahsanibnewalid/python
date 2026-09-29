@@ -1094,7 +1094,10 @@ def login():
             require_csrf()
         except Exception as exc:
             from werkzeug.exceptions import BadRequest
-            if isinstance(exc, BadRequest) and "Invalid security token" in str(exc.description):
+            if isinstance(exc, BadRequest) and (
+                "Invalid security token" in str(exc.description)
+                or "form session expired" in str(exc.description).lower()
+            ):
                 # Drop the stale session so the redirected GET creates a
                 # completely fresh CSRF token and session cookie.
                 session.clear()
@@ -1443,7 +1446,7 @@ def user_home():
     stories = serialize_stories(conn, fetch_stories(conn, user_id))
     conn.close()
 
-    return render_template(
+    response = make_response(render_template(
         "user_home.html",
         current_user=current_user,
         users=users,
@@ -1459,7 +1462,10 @@ def user_home():
         joined_groups=joined_groups,
         joined_chat_groups=joined_chat_groups,
         csrf=csrf_token()
-    )
+    ))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/network")
@@ -2482,17 +2488,29 @@ def api_message_notifications():
     if not user_required():
         return jsonify({"error":"login_required"}), 401
     uid=session["user_id"]
+    try:
+        after_id=max(0, int(request.args.get("after", 0)))
+    except (TypeError, ValueError):
+        after_id=0
     conn=get_db_connection()
+    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows=conn.execute("""
         SELECT m.id,m.sender_id,m.receiver_id,m.message,m.created_at,u.name,u.username,u.photo
         FROM messages m JOIN users u ON u.id=m.sender_id
-        WHERE m.receiver_id=? AND m.is_read=0
+        WHERE m.receiver_id=? AND m.id>? 
           AND (m.expires_at IS NULL OR m.expires_at>?)
-        ORDER BY m.id DESC LIMIT 10
-    """, (uid, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))).fetchall()
-    unread=conn.execute("SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0", (uid,)).fetchone()[0]
+        ORDER BY m.id ASC LIMIT 50
+    """, (uid, after_id, now)).fetchall()
+    unread=conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0",
+        (uid,)
+    ).fetchone()[0]
     conn.close()
-    return jsonify({"messages":[dict(r) for r in rows],"unread_count":unread})
+    return jsonify({
+        "messages":[dict(r) for r in rows],
+        "unread_count":unread,
+        "latest_id":max([int(r["id"]) for r in rows], default=after_id)
+    })
 
 
 @app.route("/api/users/<int:user_id>/block", methods=["POST"])
@@ -3669,27 +3687,63 @@ def view_profile(user_id):
                     flash(f"Profile update failed: {exc}", "error")
 
         elif form_identifier == "admin_media":
-            photo=request.files.get("photo"); cover=request.files.get("cover_photo"); changed=[]
+            photo=request.files.get("photo")
+            cover=request.files.get("cover_photo")
+            changed=[]
+            new_files=[]
+            old_files_to_remove=[]
             try:
                 if photo and photo.filename:
-                    if not allowed_file(photo.filename) or not validate_image_signature(photo): raise ValueError("Invalid profile image format.")
-                    new_name=generate_unique_filename(photo.filename,prefix="profile"); new_path=os.path.join(app.config["UPLOAD_FOLDER"],new_name); photo.save(new_path)
-                    old_photo=profile["photo"]; conn.execute("UPDATE users SET photo=? WHERE id=?",(new_name,user_id)); changed.append("profile photo")
+                    if not allowed_file(photo.filename) or not validate_image_signature(photo):
+                        raise ValueError("Invalid profile image format.")
+                    new_name=generate_unique_filename(photo.filename,prefix="profile")
+                    if not new_name:
+                        raise ValueError("Could not prepare the new profile image.")
+                    new_path=os.path.join(app.config["UPLOAD_FOLDER"],new_name)
+                    photo.save(new_path)
+                    new_files.append(new_path)
+                    old_photo=profile["photo"]
+                    conn.execute("UPDATE users SET photo=? WHERE id=?",(new_name,user_id))
+                    changed.append("profile photo")
                     if old_photo and old_photo!="default_profile.png":
-                        try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"],old_photo))
-                        except OSError: pass
+                        old_files_to_remove.append(os.path.join(app.config["UPLOAD_FOLDER"],old_photo))
+
                 if cover and cover.filename:
-                    if not allowed_file(cover.filename) or not validate_image_signature(cover): raise ValueError("Invalid cover photo format.")
-                    new_cover=generate_unique_filename(cover.filename,prefix="cover"); cover_path=os.path.join(app.config["UPLOAD_FOLDER"],new_cover); cover.save(cover_path)
-                    old_cover=profile["cover_photo"]; conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(new_cover,user_id)); create_media_update_post(conn,user_id,cover_path,"updated their cover photo."); changed.append("cover photo")
+                    if not allowed_file(cover.filename) or not validate_image_signature(cover):
+                        raise ValueError("Invalid cover photo format.")
+                    new_cover=generate_unique_filename(cover.filename,prefix="cover")
+                    if not new_cover:
+                        raise ValueError("Could not prepare the new cover image.")
+                    cover_path=os.path.join(app.config["UPLOAD_FOLDER"],new_cover)
+                    cover.save(cover_path)
+                    new_files.append(cover_path)
+                    old_cover=profile["cover_photo"]
+                    conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(new_cover,user_id))
+                    create_media_update_post(conn,user_id,cover_path,"updated their cover photo.")
+                    changed.append("cover photo")
                     if old_cover and old_cover!=new_cover:
-                        try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"],old_cover))
-                        except OSError: pass
+                        old_files_to_remove.append(os.path.join(app.config["UPLOAD_FOLDER"],old_cover))
+
                 conn.commit()
+
+                # Only remove old files after the DB transaction is durable.
+                for old_path in old_files_to_remove:
+                    try:
+                        os.remove(old_path)
+                    except OSError:
+                        pass
+
                 flash("Profile media updated successfully.","success") if changed else flash("No media was selected.","info")
-                if changed: log_activity("UPDATE_MEDIA",f"Updated {', '.join(changed)} for profile '{profile['name']}'.",user_id)
+                if changed:
+                    log_activity("UPDATE_MEDIA",f"Updated {', '.join(changed)} for profile '{profile['name']}'.",user_id)
             except Exception as exc:
-                conn.rollback(); flash(f"Profile media update failed: {exc}","error")
+                conn.rollback()
+                for new_path in new_files:
+                    try:
+                        os.remove(new_path)
+                    except OSError:
+                        pass
+                flash(f"Profile media update failed: {exc}","error")
 
         # -------------------------------------------------
         # Gallery upload
