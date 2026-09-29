@@ -1,0 +1,27 @@
+/* Legacy-template bridge: inline styles in older screens are intentionally
+   overridden only for the shared visual language. */
+body{background:var(--uc-bg)!important;color:var(--uc-text)!important;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important}
+.topbar,.top,.nav,.header{background:rgba(255,255,255,.96)!important;border-color:var(--uc-border)!important;box-shadow:0 1px 10px rgba(15,23,42,.05)!important}
+html[data-theme="dark"] .topbar,html[data-theme="dark"] .top,html[data-theme="dark"] .nav,html[data-theme="dark"] .header{background:rgba(15,27,45,.96)!important}
+.page,.wrap{max-width:1280px!important}
+.card,.post,.composer,.right-card,.messages,.cv,.info-card,.gallery-card,.section,.panel,.box,.admin-table-box,.form-container,.filter-panel,.stat-card{background:var(--uc-surface)!important;border:1px solid var(--uc-border)!important;border-radius:16px!important;box-shadow:var(--uc-shadow)!important}
+input,select,textarea,.filter-input{background:var(--uc-surface)!important;color:var(--uc-text)!important;border-color:var(--uc-border-strong)!important;border-radius:12px!important}
+button,.btn,.submit-btn,.btn-filter,.story-form button{background:var(--uc-primary)!important;color:#fff!important;border:0!important;border-radius:11px!important;box-shadow:none}
+button:hover,.btn:hover,.submit-btn:hover,.btn-filter:hover{background:var(--uc-primary-strong)!important}
+.btn-clear,.btn.light,.btn-secondary{background:var(--uc-surface-soft)!important;color:var(--uc-primary)!important;border:1px solid var(--uc-border)!important}
+.brand{color:var(--uc-text)!important}.brand-mark{background:linear-gradient(135deg,var(--uc-primary),var(--uc-purple))!important}
+.desktop-mainnav a:hover,.desktop-mainnav a.active{background:var(--uc-primary-soft)!important;color:var(--uc-primary)!important}
+.cover{background:linear-gradient(135deg,var(--uc-primary),var(--uc-purple))!important}
+.story-action{background:var(--uc-surface-soft)!important;color:var(--uc-text-2)!important}.story-action.primary{background:var(--uc-primary)!important;color:#fff!important}
+.story.create{background:var(--uc-surface-soft)!important}.story.create .plus{background:var(--uc-primary)!important}
+.profile-links a:hover,.side-link:hover,.conversation:hover,.profile-mini:hover{background:var(--uc-surface-soft)!important}
+.side-icon{background:var(--uc-primary-soft)!important;color:var(--uc-primary)!important}
+.composer-title{background:var(--uc-surface-soft)!important;color:var(--uc-muted)!important}
+.composer-tab{background:var(--uc-surface-soft)!important;color:var(--uc-muted)!important}.composer-tab.active{background:var(--uc-primary-soft)!important;color:var(--uc-primary)!important}
+.post-actions{border-color:var(--uc-border)!important}.action:hover{background:var(--uc-surface-soft)!important}.action.liked{color:var(--uc-primary)!important}
+.right-title a,.mini-btn{color:var(--uc-primary)!important}.mini-btn{background:var(--uc-primary-soft)!important}
+.welcome,.story-actions{border-color:var(--uc-border)!important}
+.hero{background:linear-gradient(135deg,#eff6ff,#eef2ff 55%,#ecfeff)!important}
+html[data-theme="dark"] .card,html[data-theme="dark"] .post,html[data-theme="dark"] .composer,html[data-theme="dark"] .right-card,html[data-theme="dark"] .messages,html[data-theme="dark"] .cv,html[data-theme="dark"] .info-card,html[data-theme="dark"] .gallery-card,html[data-theme="dark"] .section,html[data-theme="dark"] .panel,html[data-theme="dark"] .box,html[data-theme="dark"] .admin-table-box,html[data-theme="dark"] .form-container,html[data-theme="dark"] .filter-panel,html[data-theme="dark"] .stat-card{background:var(--uc-surface)!important;border-color:var(--uc-border)!important;color:var(--uc-text)!important}
+html[data-theme="dark"] .hero{background:linear-gradient(135deg,#10213a,#17183b 55%,#0c2930)!important}
+@media(max-width:760px){.page{padding-left:10px!important;padding-right:10px!important}.columns{gap:10px!important}.card,.post,.composer,.right-card{border-radius:14px!important}}
