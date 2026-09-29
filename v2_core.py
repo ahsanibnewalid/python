@@ -1491,6 +1491,13 @@ def install(app, get_db_connection, require_csrf):
             "SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",
             (conversation_id,user_id())
         ).fetchall()
+        # Bridge ordinary two-person Workspace conversations into the same
+        # legacy social inbox used by /messages.
+        member_ids=[int(x[0]) for x in conn.execute("SELECT user_id FROM conversation_members WHERE conversation_id=?",(conversation_id,)).fetchall()]
+        context=conn.execute("SELECT COALESCE(context_type,'') FROM conversations WHERE id=?",(conversation_id,)).fetchone()
+        if len(member_ids)==2 and context and not context[0]:
+            peer=member_ids[0] if member_ids[1]==user_id() else member_ids[1]
+            conn.execute("INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL)",(user_id(),peer,text,None,None,0,_now(),None))
         for recipient in recipients:
             notify(conn, recipient["user_id"], "message", "New message", text[:120], "/platform/ui/workspace")
         conn.commit(); mid=cur.lastrowid; conn.close()
