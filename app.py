@@ -1674,15 +1674,18 @@ def api_stories():
 
 @app.route("/posts/create", methods=["POST"])
 def create_post():
+    wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", "")
     if not user_required():
-        return redirect(url_for("user_login"))
+        return (jsonify({"error": "login_required"}), 401) if wants_json else redirect(url_for("user_login"))
     require_csrf()
     caption=request.form.get("caption", "").strip()[:2000]
     media=request.files.get("media")
     mode=request.form.get("post_type", "post").strip().lower()
     has_media=bool(media and media.filename)
     if not caption and not has_media:
-        flash("Write something or choose a photo/video before publishing.", "error")
+        message = "Write something or choose a photo/video before publishing."
+        if wants_json: return jsonify({"error": message}), 400
+        flash(message, "error")
         return redirect(url_for("user_home")+"#newsfeed")
     if mode not in {"post", "reel"}:
         mode="post"
@@ -1717,7 +1720,9 @@ def create_post():
         if saved_path:
             try: os.remove(saved_path)
             except OSError: pass
-        flash(str(exc), "error")
+        message = str(exc)
+        if wants_json: return jsonify({"error": message}), 400
+        flash(message, "error")
         return redirect(url_for("user_home")+"#newsfeed")
     except Exception:
         conn.rollback(); conn.close()
@@ -1725,7 +1730,9 @@ def create_post():
             try: os.remove(saved_path)
             except OSError: pass
         app.logger.exception("Post creation failed")
-        flash("The post could not be published. Please try again.", "error")
+        message = "The post could not be published. Please try again."
+        if wants_json: return jsonify({"error": message}), 500
+        flash(message, "error")
         return redirect(url_for("user_home")+"#newsfeed")
     conn.close()
     flash("Reel published." if mode == "reel" else "Post published to the student newsfeed.", "success")
