@@ -997,8 +997,7 @@ def log_activity(action, description, target_user_id=None):
             admin_username,
             action,
             target_user_id,
-            description,
-            created_at
+            description,            created_at
         )
         VALUES (?, ?, ?, ?, ?)
         """,
@@ -1997,8 +1996,7 @@ def public_profile(user_id):
         return redirect(url_for("user_login"))
 
     conn = get_db_connection()
-    profile = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    gallery = conn.execute(
+    profile = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()    gallery = conn.execute(
         "SELECT * FROM gallery WHERE user_id = ? ORDER BY id DESC",
         (user_id,)
     ).fetchall()
@@ -2998,7 +2996,6 @@ def home():
                 user_id = cursor.lastrowid
 
                 conn.commit()
-
                 conn.close()
 
                 log_activity(
@@ -3718,6 +3715,12 @@ def too_large(error):
 def server_error(error):
     return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
+
+from v2_core import install as install_v2_core
+
+# V2: independent multi-institution education + employment platform layer.
+# This is intentionally not an integration with external social networks.
+install_v2_core(app, get_db_connection, require_csrf)
 
 # ---------------------------------------------------------
 # Run
