@@ -24,7 +24,7 @@ class PlatformV2StaticTests(unittest.TestCase):
             "organization_memberships", "cv_profiles", "jobs",
             "job_applications", "application_events", "conversations",
             "conversation_members", "conversation_messages",
-            "platform_notifications",
+            "platform_notifications", "study_resources", "resource_enrollments", "resource_stars",
         ):
             self.assertIn("CREATE TABLE IF NOT EXISTS " + table, self.source)
 
@@ -35,6 +35,11 @@ class PlatformV2StaticTests(unittest.TestCase):
             '@bp.post("/organizations/<int:organization_id>/jobs")',
             '@bp.post("/jobs/<int:job_id>/apply")',
             '@bp.post("/applications/<int:application_id>/status")',
+            '@bp.get("/study-resources")',
+            '@bp.post("/courses/<int:course_id>/resources")',
+            '@bp.post("/study-resources/<int:resource_id>/enroll")',
+            '@bp.post("/study-resources/<int:resource_id>/star")',
+            '@bp.get("/study-resources/<int:resource_id>/file")',
             '@bp.post("/conversations/<int:conversation_id>/messages")',
             '@bp.get("/notifications")',
         ):
@@ -43,7 +48,7 @@ class PlatformV2StaticTests(unittest.TestCase):
     def test_workspace_exists(self):
         self.assertTrue(WORKSPACE.exists())
         text = WORKSPACE.read_text(encoding="utf-8")
-        for marker in ("Jobs", "My CV", "Applications", "Messages", "Notifications", "Manage"):
+        for marker in ("Jobs", "My CV", "Study Resources", "Teacher publishing", "Applications", "Messages", "Notifications", "Manage"):
             self.assertIn(marker, text)
 
 

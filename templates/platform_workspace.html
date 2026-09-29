@@ -17,7 +17,7 @@ a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);back
 <main class="wrap">
 <section class="hero"><div class="eyebrow">Your student & career space</div><h1>Learn. Connect. Get hired.</h1><p>One focused workspace for university life and professional growth—courses, recorded classes, notices, jobs, applications, CVs and conversations without leaving your platform.</p><div class="hero-actions"><a href="#jobs" onclick="show('jobs')">💼 Explore jobs</a><a class="ghost" href="#cv" onclick="show('cv')">📄 Build my CV</a><a class="ghost" href="#messages" onclick="show('messages')">💬 Messages</a></div></section><div class="stats"><div class="stat"><strong>💼</strong><span>Jobs & opportunities</span></div><div class="stat"><strong>📄</strong><span>Career-ready CV</span></div><div class="stat"><strong>🎓</strong><span>Academic workspace</span></div><div class="stat"><strong>💬</strong><span>People & recruiters</span></div></div>
 <div id="flash"></div>
-<div class="tabs"><button class="active" onclick="show('jobs',this)">💼 Jobs</button><button onclick="show('cv',this)">📄 My CV</button><button onclick="show('applications',this)">📬 Applications</button><button onclick="show('messages',this)">💬 Messages</button><button onclick="show('notifications',this)">🔔 Notifications</button><button onclick="show('universities',this)">🎓 Universities</button><button onclick="show('companies',this)">🏢 Companies</button><button onclick="show('office',this)">👔 My Office</button><button onclick="show('admin',this)">⚙ Manage</button></div>
+<div class="tabs"><button class="active" onclick="show('jobs',this)">💼 Jobs</button><button onclick="show('cv',this)">📄 My CV</button><button onclick="show('applications',this)">📬 Applications</button><button onclick="show('messages',this)">💬 Messages</button><button onclick="show('notifications',this)">🔔 Notifications</button><button onclick="show('universities',this)">🎓 Universities</button><button onclick="show('resources',this)">📚 Study Resources</button><button onclick="show('companies',this)">🏢 Companies</button><button onclick="show('office',this)">👔 My Office</button><button onclick="show('admin',this)">⚙ Manage</button></div>
 
 <section id="jobs" class="panel">
 <div class="grid">
@@ -50,6 +50,25 @@ a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);back
 <div class="grid">
 <div class="card wide"><div class="card-head"><div><h2>🎓 Universities & institutions</h2><p>Explore your academic memberships and open the full university management console when you have a leadership role.</p></div><span class="pill">Education</span></div><div id="universitylist"><p class="muted">Loading your institutions…</p></div></div>
 <div class="card"><h2>Academic system</h2><div class="item">🏛 <b>Departments</b><div class="muted">Chairmen and department teams</div></div><div class="item">🎓 <b>Programs & sessions</b><div class="muted">Degrees, batches and academic years</div></div><div class="item">📚 <b>Courses</b><div class="muted">Teachers, students and classes</div></div><div class="item">📢 <b>Notices & recordings</b><div class="muted">University and course communication</div></div></div>
+</div>
+</section>
+
+<section id="resources" class="panel hidden">
+<div class="grid">
+<div class="card wide"><div class="card-head"><div><h2>📚 Global Study Resources</h2><p>Discover learning materials shared by teachers across courses, institutions and countries.</p></div><span class="pill">Learn worldwide</span></div>
+<div class="fields"><input id="resourceq" placeholder="Search notes, PDFs, assignments, slides…"><select id="resource_type_filter"><option value="">All types</option><option value="pdf">PDF</option><option value="notes">Notes</option><option value="slides">Slides</option><option value="video">Video</option><option value="assignment">Assignment</option><option value="question_bank">Question bank</option><option value="link">Link</option></select><button class="btn" onclick="loadResources()">🔎 Search</button></div>
+<div id="resourcelist"><p class="muted">Loading study resources…</p></div></div>
+<div class="card"><h2>👨‍🏫 Teacher publishing</h2><p class="muted">Teachers publish into a course they teach. Academic managers with course-management permission can also publish.</p>
+<form id="resourceForm" onsubmit="publishResource(event)">
+<label>Course ID</label><input id="resource_course_id" type="number" required placeholder="Course ID">
+<label>Title</label><input id="resource_title" required placeholder="e.g. Data Structures — Lecture 4">
+<label>Type</label><select id="resource_type"><option value="pdf">PDF</option><option value="notes">Notes</option><option value="slides">Slides</option><option value="video">Video</option><option value="assignment">Assignment</option><option value="question_bank">Question bank</option><option value="link">Link</option><option value="document">Document</option><option value="other">Other</option></select>
+<label>Description</label><textarea id="resource_description" placeholder="What will learners find here?"></textarea>
+<label>Resource URL (optional)</label><input id="resource_url" type="url" placeholder="https://…">
+<label>Upload file (optional)</label><input id="resource_file" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.zip,.mp4,.webm,.mov,.jpg,.jpeg,.png">
+<label>Access</label><select id="resource_visibility"><option value="enrolled">Enrolled learners / course members</option><option value="public">Public to signed-in platform users</option></select>
+<button class="btn">📤 Publish resource</button></form></div>
+<div class="card"><h2>⭐ How star points work</h2><div class="item"><b>One person → one star</b><div class="muted">Each user can give a resource one star point. They can tap again to remove it.</div></div><div class="item"><b>No self-starring</b><div class="muted">Teachers cannot award star points to their own resources.</div></div><div class="item"><b>Enrollment is separate</b><div class="muted">A learner can enroll for access and independently star useful material.</div></div></div>
 </div>
 </section>
 
@@ -86,7 +105,41 @@ const csrf="{{ csrf_token() }}"; let selectedJob=null, selectedConversation=null
 const $=id=>document.getElementById(id);
 async function api(url,opt={}){opt.headers=Object.assign({'X-CSRF-Token':csrf,'Content-Type':'application/json'},opt.headers||{});const r=await fetch(url,opt);const d=await r.json().catch(()=>({error:'Invalid response'}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
 function msg(t,err=false){$('flash').innerHTML='<div class="'+(err?'error':'success')+'">'+t+'</div>';setTimeout(()=>{$('flash').innerHTML=''},3500)}
-function show(id,btn){document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));if(btn)btn.classList.add('active');if(id==='jobs')loadJobs();if(id==='cv')loadCV();if(id==='applications')loadApplications();if(id==='messages')loadConversations();if(id==='notifications')loadNotifications();if(id==='companies')loadCompanies();if(id==='office')loadOffice();if(id==='universities')loadUniversities();if(id==='admin')loadEmployerConsole()}
+function show(id,btn){document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));if(btn)btn.classList.add('active');if(id==='jobs')loadJobs();if(id==='cv')loadCV();if(id==='applications')loadApplications();if(id==='messages')loadConversations();if(id==='notifications')loadNotifications();if(id==='companies')loadCompanies();if(id==='office')loadOffice();if(id==='universities')loadUniversities();if(id==='resources')loadResources();if(id==='admin')loadEmployerConsole()}
+async function loadResources(){
+  try{
+    const q=$('resourceq').value.trim(),type=$('resource_type_filter').value;
+    const params=new URLSearchParams();if(q)params.set('q',q);if(type)params.set('resource_type',type);
+    const d=await api('/platform/study-resources?'+params.toString()),rows=d.resources||[];
+    $('resourcelist').innerHTML=rows.map(r=>{
+      const access=r.visibility==='public'||r.enrolled;
+      return '<div class="item"><b>📚 '+esc(r.title)+'</b> <span class="pill">'+esc(r.resource_type)+'</span> <span class="pill">⭐ '+r.star_points+'</span>'+
+        '<div class="muted">'+esc(r.course_code)+' · '+esc(r.course_title)+' · '+esc(r.institution_name)+' · By '+esc(r.author_name)+' · '+r.enrollment_count+' enrolled</div>'+
+        '<div>'+esc(r.description||'No description')+'</div>'+
+        '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">'+
+        (r.enrolled?'<span class="pill">Enrolled</span>':'<button class="btn" onclick="enrollResource('+r.id+')">Enroll / access</button>')+
+        (r.starred?'<button class="btn" onclick="starResource('+r.id+')">⭐ Unstar ('+r.star_points+')</button>':'<button class="btn" onclick="starResource('+r.id+')">☆ Star ('+r.star_points+')</button>')+
+        (r.file_path?'<a class="btn" href="/platform/study-resources/'+r.id+'/file" target="_blank" rel="noopener">Open file</a>':'')+
+        (r.resource_url?'<a class="btn" href="'+esc(r.resource_url)+'" target="_blank" rel="noopener">Open link</a>':'')+
+        '</div></div>';
+    }).join('')||'<p class="muted">No study resources found.</p>';
+  }catch(e){msg(e.message,true)}
+}
+async function enrollResource(id){try{await api('/platform/study-resources/'+id+'/enroll',{method:'POST',body:'{}'});msg('You are enrolled in this resource.');loadResources()}catch(e){msg(e.message,true)}}
+async function starResource(id){try{await api('/platform/study-resources/'+id+'/star',{method:'POST',body:'{}'});loadResources()}catch(e){msg(e.message,true)}}
+async function publishResource(e){
+  e.preventDefault();
+  const fd=new FormData();
+  fd.append('title',$('resource_title').value);fd.append('description',$('resource_description').value);
+  fd.append('resource_type',$('resource_type').value);fd.append('resource_url',$('resource_url').value);
+  fd.append('visibility',$('resource_visibility').value);
+  const file=$('resource_file').files[0];if(file)fd.append('file',file);
+  try{
+    const r=await fetch('/platform/courses/'+$('resource_course_id').value+'/resources',{method:'POST',headers:{'X-CSRF-Token':csrf},body:fd});
+    const d=await r.json().catch(()=>({error:'Invalid response'}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    msg('Study resource published.');e.target.reset();loadResources();
+  }catch(e){msg(e.message,true)}
+}
 async function loadUniversities(){const d=await api('/platform/institutions/mine');const rows=d.institutions||[];$('universitylist').innerHTML=rows.map(i=>'<div class="item"><b>🎓 '+esc(i.name)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">'+esc(i.institution_type)+' · '+i.department_count+' departments · '+i.course_count+' courses</div>'+(['institution_owner','principal','vice_principal','registrar','chairman','department_coordinator'].includes(i.role)?'<button class="btn" onclick="location.href=\'/platform/institutions/'+i.id+'/management\'">Open university management</button>':'<span class="muted">Academic member</span>')+'</div>').join('')||'<p class="muted">You are not enrolled in a university yet.</p>'}
 async function loadOffice(){const d=await api('/platform/organizations/mine');const rows=d.organizations||[];$('officeList').innerHTML=rows.map(o=>'<div class="item"><b>🏢 '+esc(o.name)+'</b> <span class="pill">'+esc(o.role.replaceAll('_',' '))+'</span><div class="muted">'+esc(o.industry||'Organization')+' · '+esc(o.title||'')+'</div><button class="btn" onclick="location.href=\'/platform/organizations/'+o.id+'/office\'">Open office management</button></div>').join('')||'<p class="muted">You do not have a company role yet. Create your company here and the platform will make you the owner.</p>';try{const d2=await api('/platform/organizations/my-duties');const ds=d2.duties||[];$('myDuties').innerHTML=ds.map(x=>'<div class="item"><b>'+esc(x.title)+'</b> <span class="pill">'+esc(x.status)+'</span><div class="muted">'+esc(x.organization_name)+(x.due_at?' · Due '+esc(x.due_at):'')+'</div><div>'+esc(x.description||'')+'</div>'+(x.status!=='completed'?'<button class="btn" onclick="completeMyDuty('+x.organization_id+','+x.id+')">Mark completed</button>':'')+'</div>').join('')||'<p class="muted">No office duties assigned to you.</p>'}catch(e){$('myDuties').innerHTML='<p class="muted">No office duties available.</p>'}}
 async function completeMyDuty(org,id){try{await api('/platform/organizations/'+org+'/duties/'+id+'/complete',{method:'POST',body:'{}'});msg('Duty completed.');loadOffice()}catch(e){msg(e.message,true)}}

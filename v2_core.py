@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from functools import wraps
 import json
 
-from flask import Blueprint, jsonify, request, session, abort, render_template
+from flask import Blueprint, jsonify, request, session, abort, render_template, send_from_directory
+from werkzeug.utils import secure_filename
 
 bp = Blueprint("v2", __name__, url_prefix="/platform")
 
@@ -239,6 +240,40 @@ def install(app, get_db_connection, require_csrf):
                 FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE,
                 FOREIGN KEY(session_id) REFERENCES academic_sessions(id) ON DELETE SET NULL,
                 FOREIGN KEY(teacher_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS study_resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL,
+                author_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                resource_type TEXT NOT NULL DEFAULT 'notes',
+                resource_url TEXT DEFAULT '',
+                file_path TEXT DEFAULT '',
+                original_filename TEXT DEFAULT '',
+                visibility TEXT NOT NULL DEFAULT 'enrolled',
+                status TEXT NOT NULL DEFAULT 'published',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE,
+                FOREIGN KEY(author_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS resource_enrollments (
+                resource_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                enrolled_at TEXT NOT NULL,
+                PRIMARY KEY(resource_id,user_id),
+                FOREIGN KEY(resource_id) REFERENCES study_resources(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS resource_stars (
+                resource_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(resource_id,user_id),
+                FOREIGN KEY(resource_id) REFERENCES study_resources(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )""",
             """CREATE TABLE IF NOT EXISTS organizations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -684,6 +719,218 @@ def install(app, get_db_connection, require_csrf):
             conn.rollback(); conn.close(); return json_error("User is already enrolled.")
         conn.close()
         return created({"course_id":course_id,"user_id":target})
+
+    @bp.get("/study-resources")
+    def list_study_resources(forced_course_id=None):
+        login_required()
+        uid = user_id()
+        q = str(request.args.get("q", "")).strip()
+        course_id = forced_course_id or request.args.get("course_id")
+        resource_type = str(request.args.get("resource_type", "")).strip()
+        like = "%" + q + "%"
+        conn = get_db_connection()
+        params = [like, like, like]
+        where = ["r.status='published'", "(r.title LIKE ? OR r.description LIKE ? OR c.title LIKE ?)"]
+        if course_id:
+            where.append("r.course_id=?"); params.append(int(course_id))
+        if resource_type:
+            where.append("r.resource_type=?"); params.append(resource_type)
+        sql = """SELECT r.id,r.course_id,r.author_id,r.title,r.description,r.resource_type,r.resource_url,
+                      r.original_filename,r.file_path,r.visibility,r.created_at,r.updated_at,
+                      c.code course_code,c.title course_title,d.name department_name,i.id institution_id,i.name institution_name,
+                      u.name author_name,
+                      (SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,
+                      (SELECT COUNT(*) FROM resource_enrollments re0 WHERE re0.resource_id=r.id AND re0.status='active') enrollment_count,
+                      EXISTS(SELECT 1 FROM resource_enrollments re WHERE re.resource_id=r.id AND re.user_id=? AND re.status='active') enrolled,
+                      EXISTS(SELECT 1 FROM resource_stars rs2 WHERE rs2.resource_id=r.id AND rs2.user_id=?) starred
+               FROM study_resources r
+               JOIN courses c ON c.id=r.course_id
+               JOIN departments d ON d.id=c.department_id
+               JOIN institutions i ON i.id=d.university_id
+               JOIN users u ON u.id=r.author_id
+               WHERE """ + " AND ".join(where) + """
+               ORDER BY star_points DESC,r.created_at DESC LIMIT 100"""
+        rows = conn.execute(sql, [uid,uid] + params).fetchall()
+        conn.close()
+        return jsonify({"resources":[dict(x) for x in rows]})
+
+    @bp.get("/courses/<int:course_id>/resources")
+    def course_study_resources(course_id):
+        return list_study_resources(course_id)
+
+    @bp.get("/study-resources/<int:resource_id>")
+    def study_resource_detail(resource_id):
+        login_required()
+        uid = user_id()
+        conn = get_db_connection()
+        row = conn.execute(
+            """SELECT r.*,c.code course_code,c.title course_title,d.name department_name,
+                      i.id institution_id,i.name institution_name,u.name author_name,
+                      (SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,
+                      EXISTS(SELECT 1 FROM resource_enrollments re WHERE re.resource_id=r.id AND re.user_id=? AND re.status='active') enrolled,
+                      EXISTS(SELECT 1 FROM resource_stars rs2 WHERE rs2.resource_id=r.id AND rs2.user_id=?) starred
+               FROM study_resources r
+               JOIN courses c ON c.id=r.course_id
+               JOIN departments d ON d.id=c.department_id
+               JOIN institutions i ON i.id=d.university_id
+               JOIN users u ON u.id=r.author_id
+               WHERE r.id=? AND r.status='published'""",
+            (uid,uid,resource_id)
+        ).fetchone()
+        if not row:
+            conn.close(); return json_error("Study resource not found.",404)
+        allowed = row["visibility"] == "public" or row["author_id"] == uid or row["enrolled"]
+        if not allowed:
+            course_member = conn.execute(
+                "SELECT 1 FROM course_enrollments WHERE course_id=? AND user_id=? AND status='active'",
+                (row["course_id"],uid)
+            ).fetchone()
+            allowed = bool(course_member)
+        if not allowed:
+            conn.close(); return json_error("Enroll in this resource or course to access it.",403)
+        conn.close()
+        return jsonify({"resource":dict(row)})
+
+    @bp.post("/courses/<int:course_id>/resources")
+    def create_study_resource(course_id):
+        login_required(); require_csrf()
+        uid=user_id()
+        conn=get_db_connection()
+        course=conn.execute(
+            """SELECT c.id,c.department_id,c.teacher_id,c.title,d.university_id
+               FROM courses c JOIN departments d ON d.id=c.department_id WHERE c.id=?""",
+            (course_id,)
+        ).fetchone()
+        if not course:
+            conn.close(); return json_error("Course not found.",404)
+        if uid != course["teacher_id"] and not can_department(uid,course["department_id"],"course.manage"):
+            conn.close(); return json_error("Only the course teacher or an authorized academic manager can publish resources.",403)
+        data=body()
+        title=str(data.get("title","")).strip()
+        description=str(data.get("description","")).strip()
+        resource_type=str(data.get("resource_type","notes")).strip().lower()
+        allowed_types={"pdf","notes","slides","video","assignment","question_bank","link","document","other"}
+        if resource_type not in allowed_types:
+            conn.close(); return json_error("Unsupported resource type.")
+        if not title:
+            conn.close(); return json_error("Resource title is required.")
+        resource_url=str(data.get("resource_url","")).strip()
+        if resource_url and urlparse(resource_url).scheme not in {"http","https"}:
+            conn.close(); return json_error("Resource URL must use http or https.")
+        file_path=""; original_filename=""
+        uploaded=request.files.get("file")
+        if uploaded and uploaded.filename:
+            safe=secure_filename(uploaded.filename)
+            if not safe:
+                conn.close(); return json_error("Invalid uploaded filename.")
+            ext=safe.rsplit(".",1)[-1].lower() if "." in safe else ""
+            allowed_ext={"pdf","doc","docx","ppt","pptx","txt","md","csv","zip","mp4","webm","mov","jpg","jpeg","png"}
+            if ext not in allowed_ext:
+                conn.close(); return json_error("This file type is not allowed.")
+            upload_root=app.config.get("UPLOAD_FOLDER","uploads")
+            resource_dir=os.path.join(upload_root,"study_resources")
+            os.makedirs(resource_dir,exist_ok=True)
+            stored=uuid.uuid4().hex+"_"+safe
+            uploaded.save(os.path.join(resource_dir,stored))
+            file_path=os.path.join("study_resources",stored)
+            original_filename=safe
+        if not resource_url and not file_path:
+            conn.close(); return json_error("Provide a resource URL or upload a file.")
+        now=_now()
+        visibility=str(data.get("visibility","enrolled")).strip()
+        if visibility not in {"public","enrolled"}: visibility="enrolled"
+        cur=conn.execute(
+            """INSERT INTO study_resources
+               (course_id,author_id,title,description,resource_type,resource_url,file_path,original_filename,visibility,status,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (course_id,uid,title,description,resource_type,resource_url,file_path,original_filename,
+             visibility,"published",now,now)
+        )
+        rid=cur.lastrowid
+        conn.commit(); conn.close()
+        return created({"id":rid,"course_id":course_id,"title":title,"status":"published"})
+
+    @bp.post("/study-resources/<int:resource_id>/enroll")
+    def enroll_study_resource(resource_id):
+        login_required(); require_csrf()
+        uid=user_id(); conn=get_db_connection()
+        row=conn.execute("SELECT id,title,author_id FROM study_resources WHERE id=? AND status='published'",(resource_id,)).fetchone()
+        if not row:
+            conn.close(); return json_error("Study resource not found.",404)
+        conn.execute(
+            """INSERT INTO resource_enrollments(resource_id,user_id,status,enrolled_at)
+               VALUES(?,?,?,?)
+               ON CONFLICT(resource_id,user_id) DO UPDATE SET status='active',enrolled_at=excluded.enrolled_at""",
+            (resource_id,uid,"active",_now())
+        )
+        if row["author_id"] != uid:
+            notify(conn,row["author_id"],"resource_enrollment","New resource enrollment",
+                   "Someone enrolled in: "+row["title"],"/platform/ui/workspace")
+        conn.commit(); conn.close()
+        return jsonify({"resource_id":resource_id,"enrolled":True})
+
+    @bp.post("/study-resources/<int:resource_id>/star")
+    def star_study_resource(resource_id):
+        login_required(); require_csrf()
+        uid=user_id(); conn=get_db_connection()
+        row=conn.execute("SELECT id,title,author_id FROM study_resources WHERE id=? AND status='published'",(resource_id,)).fetchone()
+        if not row:
+            conn.close(); return json_error("Study resource not found.",404)
+        if row["author_id"] == uid:
+            conn.close(); return json_error("You cannot star your own resource.",400)
+        access = conn.execute(
+            """SELECT r.visibility,
+                      EXISTS(SELECT 1 FROM resource_enrollments re WHERE re.resource_id=r.id AND re.user_id=? AND re.status='active') enrolled
+               FROM study_resources r WHERE r.id=?""",
+            (uid,resource_id)
+        ).fetchone()
+        if not access:
+            conn.close(); return json_error("Study resource not found.",404)
+        if access["visibility"] != "public" and not access["enrolled"]:
+            course_access = conn.execute(
+                "SELECT 1 FROM course_enrollments re JOIN study_resources r ON r.course_id=re.course_id WHERE r.id=? AND re.user_id=? AND re.status='active'",
+                (resource_id,uid)
+            ).fetchone()
+            if not course_access:
+                conn.close(); return json_error("Enroll in the resource before starring it.",403)
+        existing=conn.execute("SELECT 1 FROM resource_stars WHERE resource_id=? AND user_id=?",(resource_id,uid)).fetchone()
+        if existing:
+            conn.execute("DELETE FROM resource_stars WHERE resource_id=? AND user_id=?",(resource_id,uid))
+            starred=False
+        else:
+            conn.execute("INSERT INTO resource_stars(resource_id,user_id,created_at) VALUES(?,?,?)",(resource_id,uid,_now()))
+            starred=True
+        count=conn.execute("SELECT COUNT(*) AS n FROM resource_stars WHERE resource_id=?",(resource_id,)).fetchone()["n"]
+        if starred:
+            notify(conn,row["author_id"],"resource_star","Resource received a star",
+                   row["title"]+" received a star point.","/platform/ui/workspace")
+        conn.commit(); conn.close()
+        return jsonify({"resource_id":resource_id,"starred":starred,"star_points":count})
+
+    @bp.get("/study-resources/<int:resource_id>/file")
+    def study_resource_file(resource_id):
+        login_required()
+        uid=user_id(); conn=get_db_connection()
+        row=conn.execute(
+            "SELECT course_id,author_id,visibility,file_path,original_filename,status FROM study_resources WHERE id=?",
+            (resource_id,)
+        ).fetchone()
+        if not row or row["status"] != "published" or not row["file_path"]:
+            conn.close(); abort(404)
+        allowed=row["visibility"]=="public" or row["author_id"]==uid
+        if not allowed:
+            allowed=bool(conn.execute(
+                "SELECT 1 FROM resource_enrollments WHERE resource_id=? AND user_id=? AND status='active'",
+                (resource_id,uid)).fetchone())
+        if not allowed:
+            allowed=bool(conn.execute(
+                "SELECT 1 FROM course_enrollments WHERE course_id=? AND user_id=? AND status='active'",
+                (row["course_id"],uid)).fetchone())
+        conn.close()
+        if not allowed: abort(403)
+        directory=os.path.join(app.config.get("UPLOAD_FOLDER","uploads"),"study_resources")
+        return send_from_directory(directory,os.path.basename(row["file_path"]),as_attachment=False,
+                                    download_name=row["original_filename"] or "study-resource")
 
     @bp.post("/institutions/<int:institution_id>/notices")
     def publish_notice(institution_id):
