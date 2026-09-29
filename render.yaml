@@ -29,12 +29,6 @@ services:
         value: University Connect
       - key: STORAGE_ROOT
         value: /var/data
-      - key: PRIVATE_MEDIA_ROOT
-        value: /var/data/private_media/posts
-    disk:
-      name: universityconnect-media
-      mountPath: /var/data
-      sizeGB: 10
 databases:
   - name: universityconnect-db
     plan: starter
