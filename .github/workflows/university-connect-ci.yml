@@ -31,4 +31,5 @@ for path in root.glob("*.html"):
         raise SystemExit(f"{path}: {exc}")
 print("All templates compile.")
 PY
+      - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: python -c "import app; app.init_db(); print('Application imports and DB initialization succeeds.')"

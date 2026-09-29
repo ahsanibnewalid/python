@@ -27,6 +27,8 @@ ROLE_PERMISSIONS = {
     "hr_manager": {"job.create", "application.review"},
     "recruiter": {"job.create", "application.review"},
     "media_manager": {"notice.publish"},
+    "accounts": set(),
+    "team_leader": {"notice.publish"},
     "employee": set(),
 }
 
@@ -80,6 +82,43 @@ def install(app, get_db_connection, require_csrf):
         ).fetchone()
         conn.close()
         return bool(row and permission in ROLE_PERMISSIONS.get(row["role"], set()))
+
+    def notify(conn, target_user_id, kind, title, body="", url=""):
+        if target_user_id is None or int(target_user_id) <= 0:
+            return
+        conn.execute(
+            "INSERT INTO platform_notifications(user_id,kind,title,body,url,created_at) VALUES(?,?,?,?,?,?)",
+            (int(target_user_id), kind, title, body, url, _now()),
+        )
+
+    INSTITUTION_DELEGABLE = {
+        "institution_owner": {"principal","vice_principal","registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "principal": {"vice_principal","registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "vice_principal": {"registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "registrar": {"chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "chairman": {"department_coordinator","teacher","session_coordinator","student","staff"},
+        "department_coordinator": {"teacher","session_coordinator","student"},
+        "teacher": {"student"},
+    }
+    ORGANIZATION_DELEGABLE = {
+        "organization_owner": {"office_manager","hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
+        "office_manager": {"hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
+        "hr_manager": {"recruiter","employee"},
+        "recruiter": set(),
+        "media_manager": set(),
+        "accounts": set(),
+        "team_leader": {"employee"},
+    }
+
+    def can_assign_role(uid, memberships_table, entity_column, entity_id, role):
+        conn = get_db_connection()
+        row = conn.execute(
+            f"SELECT role FROM {memberships_table} WHERE {entity_column}=? AND user_id=? AND status='active'",
+            (entity_id, uid),
+        ).fetchone()
+        conn.close()
+        allowed = INSTITUTION_DELEGABLE if memberships_table == "institution_memberships" else ORGANIZATION_DELEGABLE
+        return bool(row and role in allowed.get(row["role"], set()))
 
     def json_error(message, status=400):
         return jsonify({"error": message}), status
@@ -681,6 +720,8 @@ def install(app, get_db_connection, require_csrf):
         data=body(); target=int(data.get("user_id",0) or 0); role=str(data.get("role","employee")).strip()
         if not target or not can_organization(user_id(),organization_id,"role.manage"):
             return json_error("You are not allowed to assign organization roles.",403)
+        if role not in ROLE_PERMISSIONS or not can_assign_role(user_id(),"organization_memberships","organization_id",organization_id,role):
+            return json_error("Your role cannot delegate this role.",403)
         conn=get_db_connection()
         conn.execute(
             """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
@@ -740,6 +781,7 @@ def install(app, get_db_connection, require_csrf):
                 "INSERT INTO application_events(application_id,actor_id,to_status,note,created_at) VALUES(?,?,?,?,?)",
                 (aid,user_id(),"applied","Application submitted.",_now())
             )
+            notify(conn, job["posted_by"], "job_application", "New job application", job["title"], "/platform/ui/workspace")
             conn.commit()
         except Exception:
             conn.rollback(); conn.close(); return json_error("You already applied for this job.")
@@ -778,6 +820,7 @@ def install(app, get_db_connection, require_csrf):
             "INSERT INTO application_events(application_id,actor_id,from_status,to_status,note,created_at) VALUES(?,?,?,?,?,?)",
             (application_id,user_id(),row["status"],new_status,data.get("note",""),_now())
         )
+        notify(conn, row["applicant_id"], "application_status", "Application status updated", new_status, "/platform/ui/workspace")
         conn.commit(); conn.close()
         return jsonify({"application_id":application_id,"status":new_status})
 
@@ -836,6 +879,12 @@ def install(app, get_db_connection, require_csrf):
             "INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",
             (conversation_id,user_id(),text,data.get("attachment_url",""),_now())
         )
+        recipients=conn.execute(
+            "SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",
+            (conversation_id,user_id())
+        ).fetchall()
+        for recipient in recipients:
+            notify(conn, recipient["user_id"], "message", "New message", text[:120], "/platform/ui/workspace")
         conn.commit(); mid=cur.lastrowid; conn.close()
         return created({"id":mid,"conversation_id":conversation_id})
 
@@ -1069,5 +1118,187 @@ def install(app, get_db_connection, require_csrf):
     def workspace():
         login_required()
         return render_template("platform_workspace.html")
+
+
+    # -------------------- remaining management APIs --------------------
+    @bp.get("/institutions/<int:institution_id>/notices")
+    def institution_notices(institution_id):
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT n.*,u.name author_name,d.name department_name
+               FROM notices n JOIN users u ON u.id=n.author_id
+               LEFT JOIN departments d ON d.id=n.department_id
+               WHERE n.institution_id=? ORDER BY COALESCE(n.published_at,n.created_at) DESC""",
+            (institution_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"notices":[dict(x) for x in rows]})
+
+    @bp.get("/courses/<int:course_id>")
+    def course_detail(course_id):
+        login_required()
+        conn=get_db_connection()
+        course=conn.execute(
+            """SELECT c.*,d.name department_name,p.name program_name,u.name teacher_name
+               FROM courses c JOIN departments d ON d.id=c.department_id
+               LEFT JOIN programs p ON p.id=c.program_id
+               LEFT JOIN users u ON u.id=c.teacher_id WHERE c.id=?""",(course_id,)
+        ).fetchone()
+        if not course:
+            conn.close(); return json_error("Course not found.",404)
+        enrollments=conn.execute(
+            """SELECT e.user_id,e.enrollment_role,e.status,e.enrolled_at,u.name
+               FROM course_enrollments e JOIN users u ON u.id=e.user_id
+               WHERE e.course_id=? ORDER BY u.name""",(course_id,)
+        ).fetchall()
+        recordings=conn.execute(
+            """SELECT r.id,r.title,r.description,r.video_url,r.thumbnail_url,r.duration_seconds,r.visibility,r.published_at
+               FROM recorded_classes r WHERE r.course_id=? ORDER BY r.published_at DESC""",(course_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"course":dict(course),"enrollments":[dict(x) for x in enrollments],
+                        "recordings":[dict(x) for x in recordings]})
+
+    @bp.get("/institutions/<int:institution_id>/courses")
+    def institution_courses(institution_id):
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT c.*,d.name department_name,p.name program_name,u.name teacher_name
+               FROM courses c JOIN departments d ON d.id=c.department_id
+               LEFT JOIN programs p ON p.id=c.program_id LEFT JOIN users u ON u.id=c.teacher_id
+               WHERE d.university_id=? ORDER BY d.name,c.semester,c.title""",(institution_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"courses":[dict(x) for x in rows]})
+
+    @bp.get("/institutions/<int:institution_id>/departments")
+    def institution_departments(institution_id):
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT d.*,COUNT(DISTINCT p.id) program_count,COUNT(DISTINCT c.id) course_count
+               FROM departments d LEFT JOIN programs p ON p.department_id=d.id
+               LEFT JOIN courses c ON c.department_id=d.id
+               WHERE d.university_id=? GROUP BY d.id ORDER BY d.name""",(institution_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"departments":[dict(x) for x in rows]})
+
+    @bp.post("/institutions/<int:institution_id>/departments")
+    def create_department(institution_id):
+        login_required(); require_csrf()
+        if not can_institution(user_id(),institution_id,"department.manage"):
+            return json_error("Department management permission required.",403)
+        data=body(); name=str(data.get("name","")).strip()
+        if not name: return json_error("Department name is required.")
+        conn=get_db_connection()
+        cur=conn.execute(
+            "INSERT INTO departments(university_id,name,code,description) VALUES(?,?,?,?)",
+            (institution_id,name,data.get("code",""),data.get("description",""))
+        )
+        conn.commit(); did=cur.lastrowid; conn.close()
+        return created({"id":did,"name":name})
+
+    @bp.post("/institutions/<int:institution_id>/members/<int:member_user_id>")
+    def assign_institution_role(institution_id,member_user_id):
+        login_required(); require_csrf()
+        if not can_institution(user_id(),institution_id,"role.manage"):
+            return json_error("Role management permission required.",403)
+        data=body(); role=str(data.get("role","student")).strip()
+        if role not in ROLE_PERMISSIONS:
+            return json_error("Unknown role.")
+        if not can_assign_role(user_id(),"institution_memberships","institution_id",institution_id,role):
+            return json_error("Your role cannot delegate this role.",403)
+        conn=get_db_connection()
+        exists=conn.execute("SELECT id FROM users WHERE id=?",(member_user_id,)).fetchone()
+        if not exists:
+            conn.close(); return json_error("User not found.",404)
+        conn.execute(
+            """INSERT INTO institution_memberships(institution_id,user_id,role,department_id,title,status,created_at)
+               VALUES(?,?,?,?,?,'active',?)
+               ON CONFLICT(institution_id,user_id,role) DO UPDATE SET
+               department_id=excluded.department_id,title=excluded.title,status='active'""",
+            (institution_id,member_user_id,role,data.get("department_id") or None,data.get("title",""),_now())
+        )
+        conn.commit(); conn.close()
+        return created({"institution_id":institution_id,"user_id":member_user_id,"role":role})
+
+    @bp.delete("/institutions/<int:institution_id>/members/<int:member_user_id>")
+    def remove_institution_role(institution_id,member_user_id):
+        login_required(); require_csrf()
+        if not can_institution(user_id(),institution_id,"role.manage"):
+            return json_error("Role management permission required.",403)
+        role=request.args.get("role")
+        conn=get_db_connection()
+        if role:
+            conn.execute("UPDATE institution_memberships SET status='inactive' WHERE institution_id=? AND user_id=? AND role=?",(institution_id,member_user_id,role))
+        else:
+            conn.execute("UPDATE institution_memberships SET status='inactive' WHERE institution_id=? AND user_id=?",(institution_id,member_user_id))
+        conn.commit(); conn.close()
+        return jsonify({"status":"inactive"})
+
+    @bp.post("/organizations/<int:organization_id>/members/<int:member_user_id>/deactivate")
+    def deactivate_org_member(organization_id,member_user_id):
+        login_required(); require_csrf()
+        if not can_organization(user_id(),organization_id,"role.manage"):
+            return json_error("Role management permission required.",403)
+        role=request.args.get("role")
+        conn=get_db_connection()
+        if role:
+            conn.execute("UPDATE organization_memberships SET status='inactive' WHERE organization_id=? AND user_id=? AND role=?",(organization_id,member_user_id,role))
+        else:
+            conn.execute("UPDATE organization_memberships SET status='inactive' WHERE organization_id=? AND user_id=?",(organization_id,member_user_id))
+        conn.commit(); conn.close()
+        return jsonify({"status":"inactive"})
+
+    @bp.get("/organizations/<int:organization_id>/applications")
+    def organization_applications(organization_id):
+        login_required()
+        if not can_organization(user_id(),organization_id,"application.review"):
+            abort(403)
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT a.id,a.status,a.created_at,a.updated_at,a.cover_letter,a.portfolio_url,
+                      a.cv_snapshot,j.id job_id,j.title,u.id applicant_id,u.name applicant_name,u.gmail applicant_email
+               FROM job_applications a JOIN jobs j ON j.id=a.job_id
+               JOIN users u ON u.id=a.applicant_id
+               WHERE j.organization_id=? ORDER BY a.created_at DESC""",(organization_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"applications":[dict(x) for x in rows]})
+
+    @bp.get("/courses/<int:course_id>/recordings")
+    def course_recordings(course_id):
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT r.*,u.name teacher_name,c.title course_title
+               FROM recorded_classes r JOIN courses c ON c.id=r.course_id
+               JOIN users u ON u.id=r.teacher_id WHERE r.course_id=?
+               ORDER BY COALESCE(r.published_at,r.created_at) DESC""",(course_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"recordings":[dict(x) for x in rows]})
+
+    @bp.get("/search/all")
+    def search_all():
+        login_required()
+        q=str(request.args.get("q","")).strip()
+        if len(q)<2: return jsonify({"institutions":[],"departments":[],"courses":[],"organizations":[],"jobs":[],"users":[]})
+        like="%"+q+"%"
+        conn=get_db_connection()
+        institutions=conn.execute("SELECT id,name,institution_type FROM institutions WHERE name LIKE ? LIMIT 20",(like,)).fetchall()
+        departments=conn.execute("SELECT id,university_id,name,code FROM departments WHERE name LIKE ? OR code LIKE ? LIMIT 20",(like,like)).fetchall()
+        courses=conn.execute("SELECT id,code,title,department_id FROM courses WHERE title LIKE ? OR code LIKE ? LIMIT 20",(like,like)).fetchall()
+        organizations=conn.execute("SELECT id,name,industry FROM organizations WHERE name LIKE ? OR industry LIKE ? LIMIT 20",(like,like)).fetchall()
+        jobs=conn.execute("SELECT id,title,organization_id,location,work_mode FROM jobs WHERE status='open' AND (title LIKE ? OR skills LIKE ? OR description LIKE ?) LIMIT 20",(like,like,like)).fetchall()
+        users=conn.execute("SELECT id,name,username,headline,occupation FROM users WHERE name LIKE ? OR username LIKE ? OR headline LIKE ? LIMIT 20",(like,like,like)).fetchall()
+        conn.close()
+        return jsonify({k:[dict(x) for x in rows] for k,rows in {
+            "institutions":institutions,"departments":departments,"courses":courses,
+            "organizations":organizations,"jobs":jobs,"users":users}.items()})
+
 
     app.register_blueprint(bp)
