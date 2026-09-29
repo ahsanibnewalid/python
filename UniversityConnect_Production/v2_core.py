@@ -7,7 +7,7 @@ social networks or messaging platforms.
 from datetime import datetime, timezone
 from functools import wraps
 
-from flask import Blueprint, jsonify, request, session, abort
+from flask import Blueprint, jsonify, request, session, abort, render_template
 
 bp = Blueprint("v2", __name__, url_prefix="/platform")
 
@@ -329,6 +329,74 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/health")
     def health():
         return jsonify({"module": "university-connect-v2", "status": "ok"})
+
+    @bp.get("/ui")
+    def ui_dashboard():
+        login_required()
+        uid = user_id()
+        conn = get_db_connection()
+        institutions = conn.execute(
+            """SELECT i.id,i.name,i.institution_type,m.role,d.name AS department_name
+               FROM institution_memberships m JOIN institutions i ON i.id=m.institution_id
+               LEFT JOIN departments d ON d.id=m.department_id
+               WHERE m.user_id=? AND m.status='active' ORDER BY i.name""", (uid,)
+        ).fetchall()
+        organizations = conn.execute(
+            """SELECT o.id,o.name,o.organization_type,m.role,m.title
+               FROM organization_memberships m JOIN organizations o ON o.id=m.organization_id
+               WHERE m.user_id=? AND m.status='active' ORDER BY o.name""", (uid,)
+        ).fetchall()
+        jobs = conn.execute(
+            """SELECT j.id,j.title,o.name organization_name,j.location,j.work_mode,j.employment_type,j.deadline,j.status
+               FROM jobs j JOIN organizations o ON o.id=j.organization_id
+               WHERE j.status='open' ORDER BY j.created_at DESC LIMIT 12"""
+        ).fetchall()
+        applications = conn.execute(
+            """SELECT a.id,a.status,a.created_at,j.title,o.name organization_name
+               FROM job_applications a JOIN jobs j ON j.id=a.job_id JOIN organizations o ON o.id=j.organization_id
+               WHERE a.applicant_id=? ORDER BY a.created_at DESC LIMIT 8""", (uid,)
+        ).fetchall()
+        notices = conn.execute(
+            """SELECT n.id,n.title,n.priority,n.published_at,i.name institution_name
+               FROM notices n JOIN institutions i ON i.id=n.institution_id
+               WHERE n.institution_id IN (SELECT institution_id FROM institution_memberships WHERE user_id=? AND status='active')
+               ORDER BY n.published_at DESC LIMIT 8""", (uid,)
+        ).fetchall()
+        conn.close()
+        return render_template(
+            "platform_dashboard.html",
+            institutions=[dict(x) for x in institutions],
+            organizations=[dict(x) for x in organizations],
+            jobs=[dict(x) for x in jobs],
+            applications=[dict(x) for x in applications],
+            notices=[dict(x) for x in notices],
+        )
+
+    @bp.get("/search")
+    def platform_search():
+        login_required()
+        q = str(request.args.get("q","")).strip()
+        if not q:
+            return jsonify({"query":"","institutions":[],"organizations":[],"jobs":[],"courses":[]})
+        like = "%"+q+"%"
+        conn = get_db_connection()
+        institutions = conn.execute("SELECT id,name,institution_type FROM institutions WHERE status='active' AND name LIKE ? LIMIT 20",(like,)).fetchall()
+        organizations = conn.execute("SELECT id,name,organization_type,industry FROM organizations WHERE status='active' AND name LIKE ? LIMIT 20",(like,)).fetchall()
+        jobs = conn.execute("""SELECT j.id,j.title,o.name organization_name,j.location,j.work_mode
+                               FROM jobs j JOIN organizations o ON o.id=j.organization_id
+                               WHERE j.status='open' AND (j.title LIKE ? OR j.description LIKE ? OR j.skills LIKE ?)
+                               ORDER BY j.created_at DESC LIMIT 20""",(like,like,like)).fetchall()
+        courses = conn.execute("""SELECT id,code,title,department_id FROM courses
+                                  WHERE status='active' AND (code LIKE ? OR title LIKE ?)
+                                  ORDER BY title LIMIT 20""",(like,like)).fetchall()
+        conn.close()
+        return jsonify({
+            "query":q,
+            "institutions":[dict(x) for x in institutions],
+            "organizations":[dict(x) for x in organizations],
+            "jobs":[dict(x) for x in jobs],
+            "courses":[dict(x) for x in courses],
+        })
 
     @bp.get("/dashboard")
     def dashboard_data():
