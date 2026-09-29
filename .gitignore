@@ -10,6 +10,7 @@ database.db
 database.db-*
 static/uploads/*
 !static/uploads/.gitkeep
+uploads/*
 private_media/posts/*
 !private_media/posts/.gitkeep
 .pytest_cache/
