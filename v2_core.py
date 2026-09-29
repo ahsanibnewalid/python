@@ -740,6 +740,7 @@ def install(app, get_db_connection, require_csrf):
                       c.code course_code,c.title course_title,d.name department_name,i.id institution_id,i.name institution_name,
                       u.name author_name,
                       (SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,
+                      (SELECT COUNT(*) FROM resource_enrollments re0 WHERE re0.resource_id=r.id AND re0.status='active') enrollment_count,
                       EXISTS(SELECT 1 FROM resource_enrollments re WHERE re.resource_id=r.id AND re.user_id=? AND re.status='active') enrolled,
                       EXISTS(SELECT 1 FROM resource_stars rs2 WHERE rs2.resource_id=r.id AND rs2.user_id=?) starred
                FROM study_resources r
@@ -877,6 +878,21 @@ def install(app, get_db_connection, require_csrf):
             conn.close(); return json_error("Study resource not found.",404)
         if row["author_id"] == uid:
             conn.close(); return json_error("You cannot star your own resource.",400)
+        access = conn.execute(
+            """SELECT r.visibility,
+                      EXISTS(SELECT 1 FROM resource_enrollments re WHERE re.resource_id=r.id AND re.user_id=? AND re.status='active') enrolled
+               FROM study_resources r WHERE r.id=?""",
+            (uid,resource_id)
+        ).fetchone()
+        if not access:
+            conn.close(); return json_error("Study resource not found.",404)
+        if access["visibility"] != "public" and not access["enrolled"]:
+            course_access = conn.execute(
+                "SELECT 1 FROM course_enrollments re JOIN study_resources r ON r.course_id=re.course_id WHERE r.id=? AND re.user_id=? AND re.status='active'",
+                (resource_id,uid)
+            ).fetchone()
+            if not course_access:
+                conn.close(); return json_error("Enroll in the resource before starring it.",403)
         existing=conn.execute("SELECT 1 FROM resource_stars WHERE resource_id=? AND user_id=?",(resource_id,uid)).fetchone()
         if existing:
             conn.execute("DELETE FROM resource_stars WHERE resource_id=? AND user_id=?",(resource_id,uid))
