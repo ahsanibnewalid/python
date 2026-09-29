@@ -48,3 +48,19 @@ def test_same_university_profile_access_is_allowed():
     _login(client, a)
     response = client.get(f"/profile/{b}")
     assert response.status_code == 200
+
+def test_cross_university_chat_group_is_hidden():
+    conn = app.get_db_connection()
+    a = _user(conn, "Tenant E", "tenant_e", 4004)
+    b = _user(conn, "Tenant F", "tenant_f", 5005)
+    cur = conn.execute(
+        "INSERT INTO chat_groups(name,description,privacy,created_by,university_id,created_at) VALUES(?,?,?,?,?,?)",
+        ("Private Tenant Chat", "", "open", b, 5005, "2026-01-01 00:00:00"),
+    )
+    gid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    client = app.app.test_client()
+    _login(client, a)
+    response = client.get(f"/chat-groups/{gid}")
+    assert response.status_code == 404
