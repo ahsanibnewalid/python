@@ -91,7 +91,7 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
 REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
 
 DB_FILE = os.environ.get("DB_FILE", "database.db")
-PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join(STORAGE_ROOT, "private_media", "posts"))
+PRIVATE_MEDIA_FOLDER = os.path.abspath(os.environ.get("PRIVATE_MEDIA_ROOT", os.path.join(STORAGE_ROOT, "private_media", "posts")))
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
