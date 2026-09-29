@@ -8,6 +8,10 @@ services:
     autoDeployTrigger: checksPass
     startCommand: gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /health
+    disk:
+      name: universityconnect-media
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: APP_ENV
         value: production
