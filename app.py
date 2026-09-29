@@ -2789,7 +2789,11 @@ def create_chat_group():
     source_group_id=request.form.get("source_group_id",type=int)
     if not name:
         flash("Chat group name is required.","error"); return redirect(url_for("messages"))
-    conn=get_db_connection(); now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn=get_db_connection()
+    user=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not user or user["university_id"] is None:
+        conn.close(); flash("Your account must be linked to a university before creating a chat group.","error"); return redirect(url_for("messages"))
+    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     members=[uid]
     privacy="open"
     if kind=="linked":
