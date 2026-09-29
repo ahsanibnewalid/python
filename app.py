@@ -25,6 +25,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from production_hardening import install as install_production_hardening, require_same_tenant
 
 
 app = Flask(__name__)
@@ -69,7 +70,8 @@ else:
         # a restart there.
         app.secret_key = secrets.token_hex(32)
 
-UPLOAD_FOLDER = os.path.join("static", "uploads")
+STORAGE_ROOT = os.path.abspath(os.environ.get("STORAGE_ROOT", "."))
+UPLOAD_FOLDER = os.path.join(STORAGE_ROOT, "static", "uploads")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "m4v"}
@@ -86,7 +88,7 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
 REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
 
 DB_FILE = os.environ.get("DB_FILE", "database.db")
-PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join("private_media", "posts"))
+PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join(STORAGE_ROOT, "private_media", "posts"))
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
@@ -1016,7 +1018,10 @@ def log_activity(action, description, target_user_id=None):
 
 
 def admin_required():
-    return session.get("logged_in") is True
+    hardened = app.extensions.get("hardened_admin_required")
+    if hardened:
+        return hardened()
+    return session.get("logged_in") is True and session.get("admin_username") == ADMIN_USER
 
 
 def notify_user(conn, user_id, title, body):
@@ -3718,6 +3723,11 @@ def too_large(error):
 def server_error(error):
     return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
+
+# Install production request guards, security headers and health endpoints
+# after all core configuration is available. The helper is intentionally
+# additive and does not change the existing application routes.
+install_production_hardening(app, get_db_connection, ADMIN_USER)
 
 # ---------------------------------------------------------
 # Run
