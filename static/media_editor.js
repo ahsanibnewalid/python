@@ -113,15 +113,18 @@ function draw(){
  if(!state.video)return;
  const c=qs("#mediaEditorCanvas");if(!c)return;
  const src=state.video,w=src.videoWidth||src.naturalWidth||src.width,h=src.videoHeight||src.naturalHeight||src.height;if(!w||!h)return;
- const size=outputSize(w,h,state.ratio,state.rotation);c.width=size.w;c.height=size.h;
- const ctx=c.getContext("2d");state.canvas=c;state.ctx=ctx;
- ctx.save();ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle="#111";ctx.fillRect(0,0,c.width,c.height);
- ctx.filter=\`brightness(\${state.brightness}%) contrast(\${state.contrast}%) saturate(\${state.saturation}%)\`;
  const rotated=state.rotation%180!==0;
- const baseW=rotated?h:w,baseH=rotated?w:h;const crop=cropRect(baseW,baseH,state.ratio);
- const sx=rotated?0:crop.x,sy=rotated?0:crop.y,sw=rotated?baseW:crop.w,sh=rotated?baseH:crop.h;
- ctx.translate(c.width/2,c.height/2);ctx.rotate(state.rotation*Math.PI/180);
- const scale=Math.max(c.width/sw,c.height/sh);ctx.drawImage(src,sx,sy,sw,sh,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);ctx.restore();
+ const rw=rotated?h:w,rh=rotated?w:h;
+ const maxSource=960,scale=Math.min(1,maxSource/Math.max(rw,rh));
+ const bw=Math.max(2,Math.round(rw*scale)),bh=Math.max(2,Math.round(rh*scale));
+ const off=document.createElement("canvas");off.width=bw;off.height=bh;const oc=off.getContext("2d");
+ oc.save();oc.translate(bw/2,bh/2);oc.rotate(state.rotation*Math.PI/180);
+ oc.filter=\`brightness(\${state.brightness}%) contrast(\${state.contrast}%) saturate(\${state.saturation}%)\`;
+ oc.drawImage(src,-(w*scale)/2,-(h*scale)/2,w*scale,h*scale);oc.restore();
+ const crop=cropRect(bw,bh,state.ratio);const size=outputSize(bw,bh,state.ratio,0);c.width=size.w;c.height=size.h;
+ const ctx=c.getContext("2d");state.canvas=c;state.ctx=ctx;ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle="#111";ctx.fillRect(0,0,c.width,c.height);
+ const fit=Math.max(c.width/crop.w,c.height/crop.h);
+ ctx.drawImage(off,crop.x,crop.y,crop.w,crop.h,(c.width-crop.w*fit)/2,(c.height-crop.h*fit)/2,crop.w*fit,crop.h*fit);
  if(state.text){ctx.save();ctx.font=\`700 \${Math.max(18,Math.round(c.width/18))}px system-ui,sans-serif\`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="rgba(0,0,0,.5)";const tw=ctx.measureText(state.text).width+28;ctx.fillRect(c.width/2-tw/2,c.height*.78-24,tw,48);ctx.fillStyle="#fff";ctx.fillText(state.text,c.width/2,c.height*.78);ctx.restore()}
 }
 async function renderImage(){
@@ -146,7 +149,7 @@ async function renderVideo(){
    draw();setProgress(clamp((v.currentTime-start)/(end-start),0,1));raf=requestAnimationFrame(frame)
  }
  v.currentTime=start;await v.play();rec.start(250);frame();
- const blob=await done;stream.getTracks().forEach(t=>t.stop());v.pause();v.currentTime=start;return new File([blob],"edited-video.webm",{type:"video/webm"});
+ const blob=await done;stream.getTracks().forEach(t=>t.stop());v.pause();v.currentTime=start;if(blob.size>58*1024*1024)throw new Error('Edited video is too large. Please shorten the video or lower its resolution.');return new File([blob],"edited-video.webm",{type:"video/webm"});
 }
 async function prepareFormData(form,fieldName){
  const fd=new FormData(form);
