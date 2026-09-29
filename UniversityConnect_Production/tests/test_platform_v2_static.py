@@ -69,6 +69,22 @@ if __name__ == "__main__":
         home = (ROOT / "templates" / "user_home.html").read_text(encoding="utf-8")
         workspace = (ROOT / "templates" / "platform_workspace.html").read_text(encoding="utf-8")
         for text in (
+            "Study, Career & Campus", "Find Jobs", "My CV",
+            "Applications", "Study & Career", "Open workspace",
+        ):
+            self.assertIn(text, home)
+        for text in (
+            "Learn. Connect. Get hired.", "Find your next opportunity",
+            "Career-ready CV", "Jobs & opportunities",
+        ):
+            self.assertIn(text, workspace)
+        self.assertIn("url_for('v2.workspace')", home)
+        self.assertIn("url_for('v2.ui_dashboard')", home)
+
+    def test_student_career_visual_hub_is_exposed(self):
+        home = (ROOT / "templates" / "user_home.html").read_text(encoding="utf-8")
+        workspace = (ROOT / "templates" / "platform_workspace.html").read_text(encoding="utf-8")
+        for text in (
             "Study, Career & Campus",
             "Find Jobs",
             "My CV",
