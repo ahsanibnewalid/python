@@ -29,9 +29,22 @@ A Flask-based university community platform with student profiles, social feed, 
 - Custom-domain configuration storage
 - Role framework for university/depart­ment/moderator/teacher/student/alumni
 
-## Important production gaps
+## Production hardening status
 
-This is a commercial MVP foundation, not yet a finished SaaS billing platform. Payment processing, automated custom-domain DNS/SSL, strict per-tenant authorization across every route, object storage, WebSockets and production observability still need implementation before selling to institutions at scale. PostgreSQL persistence is now supported through `DATABASE_URL`; local development can continue using SQLite.
+The production-hardening branch adds:
+- fail-closed admin authorization
+- request rate limiting and same-origin checks
+- security response headers and HTTPS enforcement
+- database health/readiness endpoints
+- user-level tenant isolation for targeted profile/message requests
+- configurable persistent `STORAGE_ROOT`
+- PostgreSQL backup/restore documentation and backup script
+- Render production configuration with Gunicorn and PostgreSQL
+- CI regression tests for authorization and tenant isolation
+
+E2EE and university-email verification are intentionally not part of this hardening scope.
+
+For a first commercial deployment, use PostgreSQL and a persistent Render disk for media, or an S3/R2-compatible object store before adding multiple web instances. Payment processing, automated custom-domain provisioning and WebSocket infrastructure remain separate product-scale enhancements.
 
 ## Run locally
 
