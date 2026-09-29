@@ -3081,6 +3081,110 @@ def home():
     )
 
 
+@app.route("/admin/platform/companies", methods=["GET", "POST"])
+def admin_platform_companies():
+    if not admin_required():
+        return redirect(url_for("login"))
+    conn = get_db_connection()
+    if request.method == "POST":
+        require_csrf()
+        action = request.form.get("action","").strip()
+        if action == "create_company":
+            name = request.form.get("name","").strip()
+            if not name:
+                flash("Company name is required.", "error")
+            else:
+                conn.execute(
+                    """INSERT INTO organizations(name,organization_type,industry,domain,description,created_at)
+                       VALUES(?,?,?,?,?,?)""",
+                    (name,"company",request.form.get("industry",""),request.form.get("domain",""),
+                     request.form.get("description",""),datetime.utcnow().isoformat())
+                )
+                conn.commit()
+                log_activity("PLATFORM_COMPANY_CREATE", f"Created company: {name}")
+                flash("Company created.", "success")
+        elif action == "create_job":
+            try:
+                org_id = int(request.form.get("organization_id","0"))
+                posted_by = int(request.form.get("posted_by","0"))
+                title = request.form.get("title","").strip()
+                description = request.form.get("description","").strip()
+                if not org_id or not posted_by or not title or not description:
+                    raise ValueError("Company, job poster, title and description are required.")
+                now = datetime.utcnow().isoformat()
+                conn.execute(
+                    """INSERT INTO jobs(organization_id,posted_by,title,department,location,work_mode,employment_type,
+                       salary_min,salary_max,currency,description,requirements,skills,deadline,vacancies,status,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?)""",
+                    (org_id,posted_by,title,request.form.get("department",""),request.form.get("location",""),
+                     request.form.get("work_mode","onsite"),request.form.get("employment_type","full_time"),
+                     request.form.get("salary_min") or None,request.form.get("salary_max") or None,
+                     request.form.get("currency","BDT"),description,request.form.get("requirements",""),
+                     request.form.get("skills",""),request.form.get("deadline") or None,
+                     int(request.form.get("vacancies","1") or 1),now,now)
+                )
+                conn.commit()
+                log_activity("PLATFORM_JOB_CREATE", f"Created job '{title}' for company #{org_id}")
+                flash("Job published.", "success")
+            except (ValueError, TypeError):
+                conn.rollback()
+                flash("Could not publish the job. Check all required fields.", "error")
+        elif action == "close_job":
+            try:
+                job_id = int(request.form.get("job_id","0"))
+                conn.execute("UPDATE jobs SET status='closed',updated_at=? WHERE id=?", (datetime.utcnow().isoformat(),job_id))
+                conn.commit()
+                log_activity("PLATFORM_JOB_CLOSE", f"Closed job #{job_id}")
+                flash("Job closed.", "success")
+            except (ValueError, TypeError):
+                conn.rollback()
+                flash("Invalid job.", "error")
+        elif action == "application_status":
+            try:
+                application_id = int(request.form.get("application_id","0"))
+                status = request.form.get("status","").strip()
+                if status not in {"applied","cv_review","shortlisted","interview","selected","rejected","withdrawn"}:
+                    raise ValueError
+                row = conn.execute(
+                    "SELECT status FROM job_applications WHERE id=?", (application_id,)
+                ).fetchone()
+                if not row:
+                    raise ValueError
+                conn.execute("UPDATE job_applications SET status=?,updated_at=? WHERE id=?",
+                             (status,datetime.utcnow().isoformat(),application_id))
+                conn.commit()
+                log_activity("PLATFORM_APPLICATION_STATUS", f"Application #{application_id} -> {status}")
+                flash("Application status updated.", "success")
+            except (ValueError, TypeError):
+                conn.rollback()
+                flash("Invalid application status update.", "error")
+        conn.close()
+        return redirect(url_for("admin_platform_companies"))
+
+    companies = conn.execute(
+        """SELECT o.id,o.name,o.industry,o.domain,o.description,COUNT(DISTINCT j.id) job_count
+           FROM organizations o LEFT JOIN jobs j ON j.organization_id=o.id
+           GROUP BY o.id ORDER BY o.name"""
+    ).fetchall()
+    jobs = conn.execute(
+        """SELECT j.*,o.name organization_name,u.name poster_name,
+                  COUNT(a.id) application_count
+           FROM jobs j JOIN organizations o ON o.id=j.organization_id
+           JOIN users u ON u.id=j.posted_by
+           LEFT JOIN job_applications a ON a.job_id=j.id
+           GROUP BY j.id ORDER BY j.created_at DESC"""
+    ).fetchall()
+    applications = conn.execute(
+        """SELECT a.id,a.status,a.created_at,j.title,o.name organization_name,u.name applicant_name
+           FROM job_applications a JOIN jobs j ON j.id=a.job_id
+           JOIN organizations o ON o.id=j.organization_id JOIN users u ON u.id=a.applicant_id
+           ORDER BY a.created_at DESC LIMIT 100"""
+    ).fetchall()
+    users = conn.execute("SELECT id,name,username,gmail FROM users ORDER BY name COLLATE NOCASE").fetchall()
+    conn.close()
+    return render_template("admin_platform_companies.html",companies=companies,jobs=jobs,applications=applications,users=users,csrf=csrf_token())
+
+
 # ---------------------------------------------------------
 # Admin user management
 # ---------------------------------------------------------

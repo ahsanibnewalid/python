@@ -695,6 +695,55 @@ def install(app, get_db_connection, require_csrf):
         conn.commit(); rid=cur.lastrowid; conn.close()
         return created({"id":rid,"course_id":course_id,"title":title})
 
+    @bp.get("/organizations")
+    def organization_directory():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT o.id,o.name,o.organization_type,o.industry,o.domain,o.description,
+                      COUNT(DISTINCT j.id) open_jobs
+               FROM organizations o
+               LEFT JOIN jobs j ON j.organization_id=o.id AND j.status='open'
+               GROUP BY o.id ORDER BY o.name"""
+        ).fetchall()
+        conn.close()
+        return jsonify({"organizations":[dict(x) for x in rows]})
+
+    @bp.get("/organizations/<int:organization_id>/public-jobs")
+    def organization_public_jobs(organization_id):
+        login_required()
+        conn = get_db_connection()
+        org = conn.execute(
+            "SELECT id,name,organization_type,industry,domain,description FROM organizations WHERE id=? AND status='active'",
+            (organization_id,)
+        ).fetchone()
+        if not org:
+            conn.close()
+            return json_error("Company not found.",404)
+        jobs = conn.execute(
+            """SELECT id,title,department,location,work_mode,employment_type,salary_min,salary_max,currency,
+                      description,requirements,skills,deadline,vacancies,created_at
+               FROM jobs WHERE organization_id=? AND status='open'
+               ORDER BY created_at DESC""",
+            (organization_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"organization":dict(org),"jobs":[dict(x) for x in jobs]})
+
+    @bp.get("/organizations/mine")
+    def my_organizations():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT o.id,o.name,o.organization_type,o.industry,o.domain,o.description,
+                      m.role,m.title,m.status
+               FROM organization_memberships m JOIN organizations o ON o.id=m.organization_id
+               WHERE m.user_id=? AND m.status='active' ORDER BY o.name""",
+            (user_id(),)
+        ).fetchall()
+        conn.close()
+        return jsonify({"organizations":[dict(x) for x in rows]})
+
     @bp.post("/organizations")
     def create_organization():
         login_required(); require_csrf()
