@@ -1,0 +1,28 @@
+name: UniversityConnect CI
+
+on:
+  push:
+    branches: ["main", "production-hardening-v1"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      FLASK_SECRET_KEY: ci-test-secret
+      ADMIN_USER: admin
+      ADMIN_PASSWORD_HASH: $2b$12$abcdefghijklmnopqrstuu
+      REQUIRE_HTTPS: "0"
+      COOKIE_SECURE: "0"
+      DB_FILE: test_database.sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements-production.txt
+      - run: python -m compileall -q app.py production_hardening.py
+      - run: pytest -q
