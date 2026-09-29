@@ -439,10 +439,20 @@ def init_db():
             privacy TEXT NOT NULL DEFAULT 'open',
             created_by INTEGER NOT NULL,
             source_group_id INTEGER DEFAULT NULL,
+            university_id INTEGER DEFAULT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (source_group_id) REFERENCES groups(id) ON DELETE SET NULL
+            FOREIGN KEY (source_group_id) REFERENCES groups(id) ON DELETE SET NULL,
+            FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE SET NULL
         )
+    """)
+    chat_group_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_groups)").fetchall()}
+    if "university_id" not in chat_group_columns:
+        conn.execute("ALTER TABLE chat_groups ADD COLUMN university_id INTEGER DEFAULT NULL")
+    conn.execute("""
+        UPDATE chat_groups
+        SET university_id = (SELECT university_id FROM users WHERE users.id = chat_groups.created_by)
+        WHERE university_id IS NULL
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_group_members (
@@ -2758,6 +2768,9 @@ def chat_group_member(conn, group_id, user_id):
 def chat_group_visible(conn, group_id, user_id):
     group=conn.execute("SELECT * FROM chat_groups WHERE id=?", (group_id,)).fetchone()
     if not group: return None, False
+    tenant=conn.execute("SELECT university_id FROM users WHERE id=?", (user_id,)).fetchone()
+    if not tenant or group["university_id"] is None or tenant["university_id"] != group["university_id"]:
+        return group, False
     member=bool(chat_group_member(conn, group_id, user_id))
     if not member and group["privacy"]=="linked" and group["source_group_id"]:
         if conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],user_id)).fetchone():
@@ -2786,7 +2799,7 @@ def create_chat_group():
         members=[r["user_id"] for r in conn.execute("SELECT user_id FROM group_members WHERE group_id=?",(source_group_id,)).fetchall()]
         if uid not in members: members.append(uid)
         privacy="linked"
-    cursor=conn.execute("INSERT INTO chat_groups(name,description,privacy,created_by,source_group_id,created_at) VALUES(?,?,?,?,?,?)",(name,description,privacy,uid,source_group_id if kind=="linked" else None,now))
+    cursor=conn.execute("INSERT INTO chat_groups(name,description,privacy,created_by,source_group_id,university_id,created_at) VALUES(?,?,?,?,?,?,?)",(name,description,privacy,uid,source_group_id if kind=="linked" else None,user["university_id"],now))
     gid=cursor.lastrowid
     for member_id in members:
         role="owner" if member_id==uid else "member"
@@ -2814,6 +2827,9 @@ def join_chat_group(group_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf(); uid=session["user_id"]; conn=get_db_connection(); group=conn.execute("SELECT * FROM chat_groups WHERE id=?",(group_id,)).fetchone()
     if not group: conn.close(); return jsonify({"error":"not_found"}),404
+    tenant=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
+    if not tenant or group["university_id"] is None or tenant["university_id"] != group["university_id"]:
+        conn.close(); return jsonify({"error":"not_allowed"}),403
     if group["privacy"]=="linked":
         if not group["source_group_id"] or not conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(group["source_group_id"],uid)).fetchone():
             conn.close(); return jsonify({"error":"You must be a member of the linked UniversityConnect group."}),403
@@ -2866,10 +2882,11 @@ def chat_groups_page():
         (EXISTS(SELECT 1 FROM chat_group_members me WHERE me.chat_group_id=cg.id AND me.user_id=?)
          OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members gm WHERE gm.group_id=cg.source_group_id AND gm.user_id=?))) AS joined
         FROM chat_groups cg JOIN users u ON u.id=cg.created_by
-        WHERE cg.privacy='open'
+        WHERE cg.university_id=?
+          AND (cg.privacy='open'
            OR EXISTS(SELECT 1 FROM chat_group_members mine WHERE mine.chat_group_id=cg.id AND mine.user_id=?)
-           OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members source_member WHERE source_member.group_id=cg.source_group_id AND source_member.user_id=?))
-        ORDER BY cg.id DESC""",(uid,uid,uid,uid)).fetchall()
+           OR (cg.privacy='linked' AND EXISTS(SELECT 1 FROM group_members source_member WHERE source_member.group_id=cg.source_group_id AND source_member.user_id=?)))
+        ORDER BY cg.id DESC""",(uid,uid,uid,uid,uid)).fetchall()
     social_groups=conn.execute("""SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name""",(uid,)).fetchall()
     conn.close(); return render_template("chat_groups.html",groups=groups,social_groups=social_groups,csrf=csrf_token())
 
