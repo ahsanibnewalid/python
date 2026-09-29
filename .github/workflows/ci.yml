@@ -2,7 +2,7 @@ name: UniversityConnect CI
 
 on:
   push:
-    branches: ["main", "production-hardening-v1"]
+    branches: ["main", "production-hardening-v1", "production-hardening-final"]
   pull_request:
     branches: ["main"]
 
