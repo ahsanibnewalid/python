@@ -89,6 +89,35 @@ def install(app, get_db_connection, require_csrf):
             (int(target_user_id), kind, title, body, url, _now()),
         )
 
+    INSTITUTION_DELEGABLE = {
+        "institution_owner": {"principal","vice_principal","registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "principal": {"vice_principal","registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "vice_principal": {"registrar","chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "registrar": {"chairman","department_coordinator","teacher","session_coordinator","student","staff"},
+        "chairman": {"department_coordinator","teacher","session_coordinator","student","staff"},
+        "department_coordinator": {"teacher","session_coordinator","student"},
+        "teacher": {"student"},
+    }
+    ORGANIZATION_DELEGABLE = {
+        "organization_owner": {"office_manager","hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
+        "office_manager": {"hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
+        "hr_manager": {"recruiter","employee"},
+        "recruiter": set(),
+        "media_manager": set(),
+        "accounts": set(),
+        "team_leader": {"employee"},
+    }
+
+    def can_assign_role(uid, memberships_table, entity_column, entity_id, role):
+        conn = get_db_connection()
+        row = conn.execute(
+            f"SELECT role FROM {memberships_table} WHERE {entity_column}=? AND user_id=? AND status='active'",
+            (entity_id, uid),
+        ).fetchone()
+        conn.close()
+        allowed = INSTITUTION_DELEGABLE if memberships_table == "institution_memberships" else ORGANIZATION_DELEGABLE
+        return bool(row and role in allowed.get(row["role"], set()))
+
     def json_error(message, status=400):
         return jsonify({"error": message}), status
 
@@ -689,6 +718,8 @@ def install(app, get_db_connection, require_csrf):
         data=body(); target=int(data.get("user_id",0) or 0); role=str(data.get("role","employee")).strip()
         if not target or not can_organization(user_id(),organization_id,"role.manage"):
             return json_error("You are not allowed to assign organization roles.",403)
+        if role not in ROLE_PERMISSIONS or not can_assign_role(user_id(),"organization_memberships","organization_id",organization_id,role):
+            return json_error("Your role cannot delegate this role.",403)
         conn=get_db_connection()
         conn.execute(
             """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
@@ -1176,6 +1207,8 @@ def install(app, get_db_connection, require_csrf):
         data=body(); role=str(data.get("role","student")).strip()
         if role not in ROLE_PERMISSIONS:
             return json_error("Unknown role.")
+        if not can_assign_role(user_id(),"institution_memberships","institution_id",institution_id,role):
+            return json_error("Your role cannot delegate this role.",403)
         conn=get_db_connection()
         exists=conn.execute("SELECT id FROM users WHERE id=?",(member_user_id,)).fetchone()
         if not exists:
