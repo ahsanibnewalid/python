@@ -432,6 +432,45 @@ def install(app, get_db_connection, require_csrf):
         ]
         for statement in statements:
             conn.execute(statement)
+
+        # One-time compatibility migration: materialize existing legacy
+        # social direct messages as ordinary two-person Workspace conversations.
+        pairs = conn.execute(
+            """SELECT MIN(sender_id,receiver_id) user_a, MAX(sender_id,receiver_id) user_b
+               FROM messages GROUP BY MIN(sender_id,receiver_id), MAX(sender_id,receiver_id)"""
+        ).fetchall()
+        for pair in pairs:
+            a_id,b_id=int(pair["user_a"]),int(pair["user_b"])
+            direct = conn.execute(
+                """SELECT c.id FROM conversations c
+                   JOIN conversation_members ma ON ma.conversation_id=c.id AND ma.user_id=?
+                   JOIN conversation_members mb ON mb.conversation_id=c.id AND mb.user_id=?
+                   WHERE COALESCE(c.context_type,'')='' AND
+                         (SELECT COUNT(*) FROM conversation_members mx WHERE mx.conversation_id=c.id)=2
+                   ORDER BY c.id LIMIT 1""",(a_id,b_id)
+            ).fetchone()
+            if direct:
+                cid=direct[0]
+            else:
+                first=conn.execute("SELECT created_at FROM messages WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?) ORDER BY id LIMIT 1",(a_id,b_id,b_id,a_id)).fetchone()
+                created_at=first["created_at"] if first else _now()
+                cur=conn.execute("INSERT INTO conversations(subject,context_type,context_id,created_by,created_at) VALUES(?,?,?,?,?)",("Direct message","",None,a_id,created_at))
+                cid=cur.lastrowid
+                conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(cid,a_id,"member",created_at))
+                conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(cid,b_id,"member",created_at))
+            legacy=conn.execute(
+                """SELECT sender_id,message,created_at FROM messages
+                   WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)
+                   ORDER BY id""",(a_id,b_id,b_id,a_id)
+            ).fetchall()
+            for m in legacy:
+                exists=conn.execute(
+                    "SELECT 1 FROM conversation_messages WHERE conversation_id=? AND sender_id=? AND body=? AND created_at=? LIMIT 1",
+                    (cid,m["sender_id"],m["message"],m["created_at"])
+                ).fetchone()
+                if not exists:
+                    conn.execute("INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",(cid,m["sender_id"],m["message"],"",m["created_at"]))
+
         conn.commit()
         conn.close()
 
