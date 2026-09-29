@@ -1735,6 +1735,8 @@ def create_post():
         flash(message, "error")
         return redirect(url_for("user_home")+"#newsfeed")
     conn.close()
+    if wants_json:
+        return jsonify({"ok": True, "post_id": post_id, "post_type": post_type})
     flash("Reel published." if mode == "reel" else "Post published to the student newsfeed.", "success")
     return redirect(url_for("user_home")+"#newsfeed")
 
