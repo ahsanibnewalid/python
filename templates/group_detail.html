@@ -7,7 +7,8 @@ async function refreshGroupState(){
     const r=await fetch('/api/groups/{{ group["id"] }}/updates?since='+lastPostId,{cache:'no-store'});
     if(!r.ok)return;
     const d=await r.json();
-    const changed=d.post_count!==document.querySelectorAll('.like').length || d.member_count!==lastMemberCount || ({{ 1 if is_admin else 0 }} && d.pending_requests!==lastRequestCount);
+    const hasNewPosts=Number(d.latest_post_id||0)>Number(lastPostId||0);
+    const changed=hasNewPosts || d.member_count!==lastMemberCount || ({{ 1 if is_admin else 0 }} && d.pending_requests!==lastRequestCount);
     if(d.new_posts&&d.new_posts.length) lastPostId=Math.max(lastPostId,...d.new_posts.map(x=>x.id));
     if(changed){ location.reload(); return; }
     lastMemberCount=d.member_count; lastRequestCount=d.pending_requests;
