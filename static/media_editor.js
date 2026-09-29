@@ -69,6 +69,11 @@ function ensureUI(){
    <button type="button" id="mediaEditorReset">Reset</button>
    <button type="button" id="mediaEditorClose">Hide editor</button>
   </div>
+  <div class="media-editor-audio">
+   <input id="mediaEditorAudio" type="file" accept="audio/*,video/*" aria-label="Choose audio or video audio source">
+   <button type="button" id="mediaEditorRemoveAudio">Remove audio</button>
+   <div class="media-editor-audio-name" id="mediaEditorAudioName">Optional: choose an audio file or video and its audio track will be added before upload.</div>
+  </div>
   <div class="media-editor-help" id="mediaEditorHelp">Edits are applied before the media is uploaded.</div>
   <div class="media-editor-progress" id="mediaEditorProgress"><span></span></div>
  </div>\`;
