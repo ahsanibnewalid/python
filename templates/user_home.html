@@ -121,7 +121,7 @@ function addPost(p){
  const feed=document.getElementById('feed'),el=document.createElement('article');el.className='post';el.dataset.id=p.id;
  const head=document.createElement('div');head.className='post-head';
  const author=document.createElement('a');author.className='post-author';author.href=p.profile_url;
- const img=document.createElement('img');img.src='/static/uploads/'+encodeURIComponent(p.photo);author.appendChild(img);
+ const img=document.createElement('img');img.src='/media/uploads/'+encodeURIComponent(p.photo);author.appendChild(img);
  const info=document.createElement('div');info.className='post-author-info';const name=document.createElement('div');name.className='post-name post-name-link';name.textContent=p.name+(p.username?' @'+p.username:'');const date=document.createElement('div');date.className='post-date';date.textContent=p.created_at;info.append(name,date);author.appendChild(info);head.appendChild(author);
  if(p.is_owner){const controls=document.createElement('div');controls.style.cssText='display:flex;gap:4px;margin-left:auto';const eb=document.createElement('button');eb.className='post-menu';eb.type='button';eb.title='Edit post';eb.textContent='✏️';eb.onclick=()=>editPost(p.id,eb);const db=document.createElement('button');db.className='post-menu';db.type='button';db.title='Delete post';db.textContent='🗑️';db.onclick=()=>deletePost(p.id,db);controls.append(eb,db);head.appendChild(controls)}
  el.appendChild(head);
@@ -157,7 +157,7 @@ const mediaMarkup=story.media_type==='video'
   : '<img id="storyViewerMedia" class="story-viewer-media" src="'+story.media_url+'" alt="Story">';
 oldMedia.outerHTML=mediaMarkup;
 
-document.getElementById('storyViewerAvatar').src='/static/uploads/'+encodeURIComponent(story.photo);
+document.getElementById('storyViewerAvatar').src='/media/uploads/'+encodeURIComponent(story.photo);
 document.getElementById('storyViewerName').textContent=story.name;
 document.getElementById('storyViewerTime').textContent=story.created_at||'';
 document.getElementById('storyViewerCaption').textContent=story.caption||'';
