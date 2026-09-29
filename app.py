@@ -30,9 +30,15 @@ from v2_core import install as install_v2_core
 
 app = Flask(__name__)
 
-# Only enable ProxyFix when this app is actually behind a trusted reverse proxy.
-# Never enable this on a directly exposed development server.
-if os.environ.get("TRUST_PROXY", "0") == "1":
+# Render and similar managed web services terminate TLS at a trusted
+# reverse proxy before forwarding traffic to Gunicorn. Trust that proxy when
+# explicitly enabled, and automatically on Render; never do this for a local
+# development server unless requested.
+TRUSTED_PROXY = os.environ.get(
+    "TRUST_PROXY",
+    "1" if os.environ.get("RENDER") else "0",
+).strip().lower() in {"1", "true", "yes"}
+if TRUSTED_PROXY:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # ---------------------------------------------------------
@@ -79,12 +85,15 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("COOKIE_SECURE", "0") == "1"
+# Browser sessions must be secure in production. This is especially
+# important behind Render's HTTPS reverse proxy.
+_cookie_secure_default = "1" if APP_ENV == "production" or os.environ.get("RENDER") else "0"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("COOKIE_SECURE", _cookie_secure_default).strip().lower() in {"1", "true", "yes"}
 app.config["SESSION_COOKIE_NAME"] = "university_session"
 app.config["SESSION_COOKIE_PATH"] = "/"
 app.config["SESSION_COOKIE_REFRESH_EACH_REQUEST"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
-REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "0") == "1"
+REQUIRE_HTTPS = os.environ.get("REQUIRE_HTTPS", "1" if os.environ.get("RENDER") else "0").strip().lower() in {"1", "true", "yes"}
 
 DB_FILE = os.environ.get("DB_FILE", "database.db")
 PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join("private_media", "posts"))
