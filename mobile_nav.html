@@ -19,12 +19,32 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
 <script>
 (function(){
   if(window.__ucGlobalMessageNotifications)return; window.__ucGlobalMessageNotifications=true;
-  const key='uc_last_message_notice_id'; let ready=false;
+  const key='uc_last_message_notice_id';
+  let ready=false;
   function toast(m){const box=document.getElementById('ucMessageToast');if(!box)return;document.getElementById('ucMessageToastTitle').textContent='New message from '+(m.name||'Someone');document.getElementById('ucMessageToastBody').textContent=m.message&&m.message!=='[Encrypted message]'?m.message:'You received a new message.';window.__ucToastHref='/messages/'+m.sender_id;box.classList.add('show');clearTimeout(window.__ucToastTimer);window.__ucToastTimer=setTimeout(hideUcMessageToast,6500)}
   window.hideUcMessageToast=function(){const box=document.getElementById('ucMessageToast');if(box)box.classList.remove('show')};
-  async function check(){try{if(location.pathname.startsWith('/login')||location.pathname.startsWith('/user-login')||location.pathname.startsWith('/logout'))return;const r=await fetch('/api/message-notifications',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const rows=d.messages||[];const max=rows.length?Math.max.apply(null,rows.map(x=>Number(x.id)||0)):0;let last=Number(localStorage.getItem(key)||0);if(!ready){if(max) localStorage.setItem(key,String(max));ready=true;return}const fresh=rows.filter(x=>Number(x.id)>last).sort((a,b)=>Number(a.id)-Number(b.id));if(fresh.length){const m=fresh[fresh.length-1];localStorage.setItem(key,String(m.id));toast(m)}
-    document.querySelectorAll('.mobile-badge').forEach(b=>{if(d.unread_count)b.textContent=d.unread_count;else b.remove()});
-  }catch(e){}}
+  async function check(){
+    try{
+      if(location.pathname.startsWith('/login')||location.pathname.startsWith('/user-login')||location.pathname.startsWith('/logout'))return;
+      let last=Number(localStorage.getItem(key)||0);
+      const r=await fetch('/api/message-notifications?after='+encodeURIComponent(last),{cache:'no-store'});
+      if(!r.ok)return;
+      const d=await r.json();
+      const rows=d.messages||[];
+      if(!ready){
+        const latest=Number(d.latest_id||last)||last;
+        if(latest>last)localStorage.setItem(key,String(latest));
+        ready=true;
+      }else if(rows.length){
+        for(const m of rows){
+          const id=Number(m.id)||0;
+          if(id>last){toast(m);last=id}
+        }
+        if(last) localStorage.setItem(key,String(last));
+      }
+      document.querySelectorAll('.mobile-badge').forEach(b=>{if(d.unread_count)b.textContent=d.unread_count;else b.remove()});
+    }catch(e){}
+  }
   check(); setInterval(check,2000);
 })();
 </script>

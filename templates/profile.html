@@ -493,12 +493,8 @@
                 class="upload-box"
             >
 
-                <input
-                    type="hidden"
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    name="form_type"
-                    value="gallery_upload"
-                >
+                <input type="hidden" name="form_type" value="gallery_upload">
 
                 <label>
                     Add photos to this gallery
@@ -547,7 +543,7 @@
                             ) }}"
                             method="POST"
                             class="delete-gallery-form"
-                            ><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">\n                            onsubmit="return confirm(
+                            onsubmit="return confirm(
                                 'Delete this photo permanently?'
                             );"
                         >
