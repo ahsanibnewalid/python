@@ -1163,6 +1163,40 @@ def install(app, get_db_connection, require_csrf):
         conn.commit(); conn.close()
         return jsonify({"status":"ok"})
 
+    @bp.get("/institutions/mine")
+    def my_institutions():
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute(
+            """SELECT i.id,i.name,i.institution_type,i.domain,i.description,m.role,m.title,
+                      (SELECT COUNT(*) FROM departments d WHERE d.university_id=i.id) department_count,
+                      (SELECT COUNT(*) FROM courses c JOIN departments d2 ON d2.id=c.department_id WHERE d2.university_id=i.id) course_count
+               FROM institution_memberships m JOIN institutions i ON i.id=m.institution_id
+               WHERE m.user_id=? AND m.status='active' ORDER BY i.name""",(user_id(),)
+        ).fetchall()
+        conn.close()
+        return jsonify({"institutions":[dict(x) for x in rows]})
+
+    @bp.get("/institutions/<int:institution_id>/management")
+    def institution_management(institution_id):
+        login_required()
+        if not can_institution(user_id(), institution_id, "department.manage") and not can_institution(user_id(), institution_id, "course.manage") and not can_institution(user_id(), institution_id, "role.manage") and not can_institution(user_id(), institution_id, "notice.publish"):
+            abort(403)
+        conn=get_db_connection()
+        institution=conn.execute("SELECT * FROM institutions WHERE id=? AND status='active'",(institution_id,)).fetchone()
+        membership=conn.execute("SELECT role,title FROM institution_memberships WHERE institution_id=? AND user_id=? AND status='active' ORDER BY CASE role WHEN 'institution_owner' THEN 0 WHEN 'principal' THEN 1 ELSE 2 END LIMIT 1",(institution_id,user_id())).fetchone()
+        conn.close()
+        if not institution or not membership: abort(404)
+        return render_template("platform_university_management.html", institution=dict(institution), membership=dict(membership))
+
+    @bp.get("/departments/<int:department_id>/programs")
+    def department_programs(department_id):
+        login_required()
+        conn=get_db_connection()
+        rows=conn.execute("SELECT id,department_id,name,code,degree,duration_years FROM programs WHERE department_id=? ORDER BY name",(department_id,)).fetchall()
+        conn.close()
+        return jsonify({"programs":[dict(x) for x in rows]})
+
     @bp.get("/ui/workspace")
     def workspace():
         login_required()

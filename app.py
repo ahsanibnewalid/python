@@ -3081,6 +3081,52 @@ def home():
     )
 
 
+@app.route("/admin/platform/universities", methods=["GET", "POST"])
+def admin_platform_universities():
+    if not admin_required():
+        return redirect(url_for("login"))
+    conn = get_db_connection()
+    if request.method == "POST":
+        require_csrf()
+        action = request.form.get("action","").strip()
+        try:
+            if action == "create_institution":
+                name=request.form.get("name","").strip()
+                if not name: raise ValueError
+                conn.execute("INSERT INTO institutions(name,institution_type,domain,description,created_at) VALUES(?,?,?,?,?)",(name,request.form.get("institution_type","university"),request.form.get("domain",""),request.form.get("description",""),datetime.utcnow().isoformat()))
+                conn.commit(); log_activity("PLATFORM_INSTITUTION_CREATE",f"Created institution: {name}"); flash("Institution created.","success")
+            elif action == "assign_role":
+                iid=int(request.form.get("institution_id","0")); uid=int(request.form.get("user_id","0")); role=request.form.get("role","student")
+                if not iid or not uid: raise ValueError
+                conn.execute("""INSERT INTO institution_memberships(institution_id,user_id,role,title,status,created_at) VALUES(?,?,?,?,?,?)
+                                ON CONFLICT(institution_id,user_id,role) DO UPDATE SET title=excluded.title,status='active',created_at=excluded.created_at""",(iid,uid,role,request.form.get("title",""),"active",datetime.utcnow().isoformat()))
+                conn.commit(); log_activity("PLATFORM_INSTITUTION_ROLE",f"Assigned {role} to user #{uid} in institution #{iid}"); flash("Academic role assigned.","success")
+            elif action == "create_department":
+                iid=int(request.form.get("institution_id","0")); name=request.form.get("name","").strip()
+                if not iid or not name: raise ValueError
+                conn.execute("INSERT INTO departments(university_id,name,code,description,created_at) VALUES(?,?,?,?,?)",(iid,name,request.form.get("code",""),request.form.get("description",""),datetime.utcnow().isoformat()))
+                conn.commit(); log_activity("PLATFORM_DEPARTMENT_CREATE",f"Created department: {name}"); flash("Department created.","success")
+            elif action == "create_program":
+                did=int(request.form.get("department_id","0")); name=request.form.get("name","").strip()
+                if not did or not name: raise ValueError
+                conn.execute("INSERT INTO programs(department_id,name,code,degree,duration_years,created_at) VALUES(?,?,?,?,?,?)",(did,name,request.form.get("code",""),request.form.get("degree",""),request.form.get("duration_years") or None,datetime.utcnow().isoformat()))
+                conn.commit(); log_activity("PLATFORM_PROGRAM_CREATE",f"Created program: {name}"); flash("Program created.","success")
+        except (ValueError,TypeError):
+            conn.rollback(); flash("Could not complete the academic action. Check the required fields.","error")
+        conn.close()
+        return redirect(url_for("admin_platform_universities"))
+    institutions=conn.execute("""SELECT i.id,i.name,i.institution_type,i.domain,i.description,
+                                  COUNT(DISTINCT m.user_id) member_count,COUNT(DISTINCT d.id) department_count,COUNT(DISTINCT c.id) course_count
+                                  FROM institutions i LEFT JOIN institution_memberships m ON m.institution_id=i.id AND m.status='active'
+                                  LEFT JOIN departments d ON d.university_id=i.id LEFT JOIN courses c ON c.department_id=d.id
+                                  GROUP BY i.id ORDER BY i.name""").fetchall()
+    departments=conn.execute("""SELECT d.id,d.name,d.code,i.name university_name,COUNT(DISTINCT p.id) program_count,COUNT(DISTINCT c.id) course_count
+                                FROM departments d JOIN institutions i ON i.id=d.university_id LEFT JOIN programs p ON p.department_id=d.id LEFT JOIN courses c ON c.department_id=d.id
+                                GROUP BY d.id ORDER BY i.name,d.name""").fetchall()
+    users=conn.execute("SELECT id,name,username FROM users ORDER BY name LIMIT 500").fetchall()
+    conn.close()
+    return render_template("admin_platform_universities.html",institutions=institutions,departments=departments,users=users,csrf=csrf_token())
+
 @app.route("/admin/platform/companies", methods=["GET", "POST"])
 def admin_platform_companies():
     if not admin_required():
