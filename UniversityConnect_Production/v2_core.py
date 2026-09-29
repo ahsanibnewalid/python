@@ -828,4 +828,202 @@ def install(app, get_db_connection, require_csrf):
         conn.commit(); mid=cur.lastrowid; conn.close()
         return created({"id":mid,"conversation_id":conversation_id})
 
+
+    # -------------------- operational APIs --------------------
+    @bp.get("/cv")
+    def get_cv():
+        login_required()
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM cv_profiles WHERE user_id=?", (user_id(),)).fetchone()
+        conn.close()
+        return jsonify({"cv": dict(row) if row else {}})
+
+    @bp.get("/jobs/<int:job_id>")
+    def job_detail(job_id):
+        login_required()
+        conn = get_db_connection()
+        job = conn.execute(
+            """SELECT j.*, o.name organization_name, o.industry organization_industry
+               FROM jobs j JOIN organizations o ON o.id=j.organization_id WHERE j.id=?""",
+            (job_id,),
+        ).fetchone()
+        if not job:
+            conn.close()
+            return json_error("Job not found.", 404)
+        application = conn.execute(
+            "SELECT id,status,created_at,updated_at FROM job_applications WHERE job_id=? AND applicant_id=?",
+            (job_id, user_id()),
+        ).fetchone()
+        conn.close()
+        return jsonify({"job": dict(job), "application": dict(application) if application else None})
+
+    @bp.get("/applications/<int:application_id>")
+    def application_detail(application_id):
+        login_required()
+        conn = get_db_connection()
+        row = conn.execute(
+            """SELECT a.*,j.title job_title,j.organization_id,o.name organization_name
+               FROM job_applications a JOIN jobs j ON j.id=a.job_id
+               JOIN organizations o ON o.id=j.organization_id WHERE a.id=?""",
+            (application_id,),
+        ).fetchone()
+        if not row:
+            conn.close()
+            return json_error("Application not found.", 404)
+        allowed = row["applicant_id"] == user_id() or can_organization(user_id(), row["organization_id"], "application.review")
+        if not allowed:
+            conn.close()
+            return json_error("You cannot view this application.", 403)
+        events = conn.execute(
+            """SELECT e.*,u.name actor_name FROM application_events e
+               JOIN users u ON u.id=e.actor_id WHERE e.application_id=? ORDER BY e.created_at""",
+            (application_id,),
+        ).fetchall()
+        conn.close()
+        return jsonify({"application": dict(row), "events": [dict(x) for x in events]})
+
+    @bp.get("/organizations/<int:organization_id>/members")
+    def organization_members(organization_id):
+        login_required()
+        if not can_organization(user_id(), organization_id, "organization.manage") and not can_organization(user_id(), organization_id, "role.manage"):
+            abort(403)
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT m.user_id,u.name,u.gmail,m.role,m.title,m.status
+               FROM organization_memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.organization_id=? ORDER BY u.name""",
+            (organization_id,),
+        ).fetchall()
+        conn.close()
+        return jsonify({"members":[dict(x) for x in rows]})
+
+    @bp.get("/institutions/<int:institution_id>/members")
+    def institution_members(institution_id):
+        login_required()
+        if not can_institution(user_id(), institution_id, "role.manage") and not can_institution(user_id(), institution_id, "institution.manage"):
+            abort(403)
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT m.user_id,u.name,u.gmail,m.role,m.title,m.department_id,m.status
+               FROM institution_memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.institution_id=? ORDER BY u.name""",
+            (institution_id,),
+        ).fetchall()
+        conn.close()
+        return jsonify({"members":[dict(x) for x in rows]})
+
+    @bp.get("/users")
+    def user_directory():
+        login_required()
+        q = str(request.args.get("q", "")).strip()
+        like = "%" + q + "%"
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT id,name,gmail,username,headline,occupation,department,university
+               FROM users WHERE name LIKE ? OR gmail LIKE ? OR username LIKE ?
+               ORDER BY name LIMIT 30""",
+            (like, like, like),
+        ).fetchall()
+        conn.close()
+        return jsonify({"users":[dict(x) for x in rows]})
+
+    @bp.get("/conversations")
+    def list_conversations():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT c.id,c.subject,c.context_type,c.context_id,c.created_at,
+                      (SELECT cm.body FROM conversation_messages cm
+                       WHERE cm.conversation_id=c.id ORDER BY cm.created_at DESC LIMIT 1) last_message
+               FROM conversations c JOIN conversation_members m ON m.conversation_id=c.id
+               WHERE m.user_id=? ORDER BY c.created_at DESC""",
+            (user_id(),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"conversations":[dict(x) for x in rows]})
+
+    @bp.get("/conversations/<int:conversation_id>")
+    def conversation_detail(conversation_id):
+        login_required()
+        conn = get_db_connection()
+        member = conn.execute(
+            "SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",
+            (conversation_id, user_id()),
+        ).fetchone()
+        if not member:
+            conn.close()
+            abort(403)
+        members = conn.execute(
+            """SELECT u.id,u.name,u.gmail,m.role FROM conversation_members m
+               JOIN users u ON u.id=m.user_id WHERE m.conversation_id=? ORDER BY u.name""",
+            (conversation_id,),
+        ).fetchall()
+        messages = conn.execute(
+            """SELECT cm.id,cm.sender_id,u.name sender_name,cm.body,cm.attachment_url,cm.created_at
+               FROM conversation_messages cm JOIN users u ON u.id=cm.sender_id
+               WHERE cm.conversation_id=? ORDER BY cm.created_at""",
+            (conversation_id,),
+        ).fetchall()
+        conn.execute(
+            """UPDATE conversation_messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL""",
+            (_now(), conversation_id, user_id()),
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"members":[dict(x) for x in members], "messages":[dict(x) for x in messages]})
+
+    @bp.post("/conversations/<int:conversation_id>/read")
+    def mark_conversation_read(conversation_id):
+        login_required(); require_csrf()
+        conn = get_db_connection()
+        member = conn.execute(
+            "SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",
+            (conversation_id, user_id()),
+        ).fetchone()
+        if not member:
+            conn.close()
+            return json_error("Conversation access denied.", 403)
+        conn.execute(
+            "UPDATE conversation_messages SET read_at=? WHERE conversation_id=? AND sender_id<>?",
+            (_now(), conversation_id, user_id()),
+        )
+        conn.commit(); conn.close()
+        return jsonify({"status":"ok"})
+
+    @bp.get("/notifications")
+    def notifications():
+        login_required()
+        conn = get_db_connection()
+        conn.execute("""CREATE TABLE IF NOT EXISTS platform_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT DEFAULT '',
+            url TEXT DEFAULT '',
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        rows = conn.execute(
+            """SELECT id,kind,title,body,url,is_read,created_at FROM platform_notifications
+               WHERE user_id=? ORDER BY created_at DESC LIMIT 50""",
+            (user_id(),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"notifications":[dict(x) for x in rows]})
+
+    @bp.post("/notifications/<int:notification_id>/read")
+    def notification_read(notification_id):
+        login_required(); require_csrf()
+        conn = get_db_connection()
+        conn.execute("UPDATE platform_notifications SET is_read=1 WHERE id=? AND user_id=?", (notification_id,user_id()))
+        conn.commit(); conn.close()
+        return jsonify({"status":"ok"})
+
+    @bp.get("/ui/workspace")
+    def workspace():
+        login_required()
+        return render_template("platform_workspace.html")
+
     app.register_blueprint(bp)
