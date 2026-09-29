@@ -16,7 +16,7 @@ const STYLE = \`
 .media-editor-tool select,.media-editor-tool input[type=text]{width:100%;min-width:0;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--text);padding:6px}
 .media-editor-buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
 .media-editor-buttons button{border:0;border-radius:8px;padding:7px 10px;background:var(--card);color:var(--text);font-weight:800;cursor:pointer}
-.media-editor-buttons button.active{background:var(--blue);color:#fff}
+.media-editor-buttons button.active{background:var(--blue);color:#fff}\n.media-editor-audio{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:10px;padding:9px;border:1px solid var(--line);border-radius:10px;background:var(--card)}\n.media-editor-audio input{min-width:0;width:100%;font-size:11px}\n.media-editor-audio button{border:0;border-radius:8px;padding:7px 10px;font-weight:800;cursor:pointer;background:var(--soft);color:var(--text)}\n.media-editor-audio-name{grid-column:1/-1;font-size:11px;color:var(--muted)}
 .media-editor-help{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
 .media-editor-progress{height:5px;background:var(--line);border-radius:999px;overflow:hidden;margin-top:8px;display:none}
 .media-editor-progress span{display:block;width:0;height:100%;background:var(--blue);transition:width .15s}
@@ -24,7 +24,7 @@ const STYLE = \`
 \`;
 if(!document.getElementById("media-editor-style")){const st=document.createElement("style");st.id="media-editor-style";st.textContent=STYLE;document.head.appendChild(st)}
 
-const state={mode:"post",file:null,url:null,type:null,kind:null,rotation:0,ratio:"original",brightness:100,contrast:100,saturation:100,text:"",start:0,end:null,duration:0,video:null,canvas:null,ctx:null,dirty:false};
+const state={mode:"post",file:null,url:null,type:null,kind:null,rotation:0,ratio:"original",brightness:100,contrast:100,saturation:100,text:"",start:0,end:null,duration:0,video:null,canvas:null,ctx:null,dirty:false,audioFile:null,audioUrl:null,audioEl:null,audioStream:null};
 
 function qs(s){return document.querySelector(s)}
 function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
@@ -81,6 +81,8 @@ function ensureUI(){
  bind("#mediaEditorSaturation","input",e=>{state.saturation=+e.target.value;state.dirty=true;draw()});
  bind("#mediaEditorStart","input",e=>{state.start=+e.target.value; if(state.end!==null&&state.start>=state.end)state.end=Math.min(state.duration,state.start+.1); if(state.video)state.video.currentTime=state.start;});
  bind("#mediaEditorEndRange","input",e=>{state.end=+e.target.value; if(state.end<=state.start)state.end=Math.min(state.duration,state.start+.1);});
+ bind("#mediaEditorAudio","change",e=>setAudioFile(e.target.files?.[0]||null));
+ bind("#mediaEditorRemoveAudio","click",()=>clearAudio());
  bind("#mediaEditorRotate","click",()=>{state.rotation=(state.rotation+90)%360;state.dirty=true;draw()});
  bind("#mediaEditorReset","click",resetControls);
  bind("#mediaEditorClose","click",()=>{const w=qs("#mediaEditor");if(w)w.hidden=true});
@@ -93,7 +95,25 @@ function resetControls(){
 }
 
 function setMode(mode){state.mode=mode;ensureUI();const w=qs("#mediaEditor");if(w)w.hidden=true}
-function clearFile(){state.file=null;state.kind=null;state.video=null;state.duration=0;state.end=null;if(state.url){URL.revokeObjectURL(state.url);state.url=null}const w=qs("#mediaEditor");if(w)w.hidden=true}
+function clearAudio(){
+ if(state.audioUrl){URL.revokeObjectURL(state.audioUrl);state.audioUrl=null}
+ if(state.audioEl){try{state.audioEl.pause();}catch(e){}}
+ if(state.audioStream){state.audioStream.getTracks().forEach(t=>t.stop());state.audioStream=null}
+ state.audioEl=null;state.audioFile=null;
+ const i=qs("#mediaEditorAudio");if(i)i.value="";
+ const n=qs("#mediaEditorAudioName");if(n)n.textContent="Optional: choose a video/audio and its audio track will be added to your post.";
+}
+function setAudioFile(file){
+ clearAudio();if(!file)return;
+ state.audioFile=file;state.audioUrl=URL.createObjectURL(file);
+ const n=qs("#mediaEditorAudioName");if(n)n.textContent="🎵 "+file.name+" — audio will be extracted automatically before upload.";
+}
+function clearFile(){
+ state.file=null;state.kind=null;state.video=null;state.duration=0;state.end=null;
+ if(state.url){URL.revokeObjectURL(state.url);state.url=null}
+ clearAudio();
+ const w=qs("#mediaEditor");if(w)w.hidden=true
+}
 function setFile(file){
  ensureUI();clearFile();if(!file)return;
  state.file=file;state.url=URL.createObjectURL(file);state.kind=file.type.startsWith("video/")?"video":"image";state.dirty=false;
@@ -149,14 +169,14 @@ async function renderVideo(){
    draw();setProgress(clamp((v.currentTime-start)/(end-start),0,1));raf=requestAnimationFrame(frame)
  }
  v.currentTime=start;await v.play();rec.start(250);frame();
- const blob=await done;stream.getTracks().forEach(t=>t.stop());v.pause();v.currentTime=start;if(blob.size>58*1024*1024)throw new Error('Edited video is too large. Please shorten the video or lower its resolution.');return new File([blob],"edited-video.webm",{type:"video/webm"});
+ const blob=await done;stream.getTracks().forEach(t=>t.stop());if(state.audioStream)state.audioStream.getTracks().forEach(t=>t.stop());v.pause();v.currentTime=start;if(blob.size>58*1024*1024)throw new Error('Edited video is too large. Please shorten the video or lower its resolution.');return new File([blob],"edited-video.webm",{type:"video/webm"});
 }
 async function prepareFormData(form,fieldName){
  const fd=new FormData(form);
  if(!state.file||!state.kind)return fd;
  if(!state.dirty)return fd;
  setProgress(0);
- const edited=state.kind==="image"?await renderImage():await renderVideo();
+ const needsRender=state.dirty||!!state.audioFile; if(!needsRender)return fd;\n const edited=state.kind==="image"?await renderImage(true):await renderVideo();
  fd.delete(fieldName);fd.append(fieldName,edited,edited.name);return fd;
 }
 function attachInput(){
