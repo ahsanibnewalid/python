@@ -1,0 +1,3 @@
+# Professional redesign
+
+Simplified professional-network visual layer and audio-free media editor. Existing social, profile, network, groups, reels, stories, messaging, jobs, companies, applications, CV/career, education, courses, notices, recordings, study resources, workspace and admin features remain. Audio picking, extraction, mixing, track injection and photo-with-audio export are removed. No external social API integration. Render deployment is handled by the existing repository deployment pipeline.
