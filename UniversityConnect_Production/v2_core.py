@@ -372,6 +372,63 @@ def install(app, get_db_connection, require_csrf):
             notices=[dict(x) for x in notices],
         )
 
+    @bp.get("/organizations/<int:organization_id>/recruitment")
+    def recruitment_dashboard(organization_id):
+        login_required()
+        conn = get_db_connection()
+        membership = conn.execute(
+            "SELECT role FROM organization_memberships WHERE organization_id=? AND user_id=? AND status='active'",
+            (organization_id,user_id())
+        ).fetchone()
+        if not membership or "application.review" not in ROLE_PERMISSIONS.get(membership["role"], set()):
+            conn.close()
+            abort(403)
+        jobs = conn.execute(
+            """SELECT j.id,j.title,j.status,j.created_at,
+                      COUNT(a.id) applications
+               FROM jobs j LEFT JOIN job_applications a ON a.job_id=j.id
+               WHERE j.organization_id=?
+               GROUP BY j.id ORDER BY j.created_at DESC""",(organization_id,)
+        ).fetchall()
+        applications = conn.execute(
+            """SELECT a.id,a.status,a.created_at,a.cover_letter,a.portfolio_url,
+                      j.title,u.id applicant_id,u.name applicant_name
+               FROM job_applications a
+               JOIN jobs j ON j.id=a.job_id JOIN users u ON u.id=a.applicant_id
+               WHERE j.organization_id=? ORDER BY a.created_at DESC""",(organization_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"organization_id":organization_id,"role":membership["role"],
+                        "jobs":[dict(x) for x in jobs],
+                        "applications":[dict(x) for x in applications]})
+
+    @bp.get("/institutions/<int:institution_id>/academic")
+    def academic_dashboard(institution_id):
+        login_required()
+        if not can_institution(user_id(), institution_id, "department.manage") and not can_institution(user_id(), institution_id, "course.manage"):
+            abort(403)
+        conn=get_db_connection()
+        departments=conn.execute(
+            """SELECT d.id,d.name,d.code,COUNT(DISTINCT s.id) sessions,COUNT(DISTINCT c.id) courses
+               FROM departments d
+               LEFT JOIN academic_sessions s ON s.department_id=d.id
+               LEFT JOIN courses c ON c.department_id=d.id
+               WHERE d.university_id=? GROUP BY d.id ORDER BY d.name""",(institution_id,)
+        ).fetchall()
+        notices=conn.execute(
+            """SELECT id,title,scope_type,priority,published_at FROM notices
+               WHERE institution_id=? ORDER BY published_at DESC LIMIT 30""",(institution_id,)
+        ).fetchall()
+        recordings=conn.execute(
+            """SELECT r.id,r.title,r.published_at,c.code,c.title course_title
+               FROM recorded_classes r JOIN courses c ON c.id=r.course_id
+               JOIN departments d ON d.id=c.department_id
+               WHERE d.university_id=? ORDER BY r.published_at DESC LIMIT 30""",(institution_id,)
+        ).fetchall()
+        conn.close()
+        return jsonify({"institution_id":institution_id,"departments":[dict(x) for x in departments],
+                        "notices":[dict(x) for x in notices],"recordings":[dict(x) for x in recordings]})
+
     @bp.get("/search")
     def platform_search():
         login_required()
