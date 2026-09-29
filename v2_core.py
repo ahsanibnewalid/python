@@ -6,6 +6,7 @@ social networks or messaging platforms.
 """
 from datetime import datetime, timezone
 from functools import wraps
+import json
 
 from flask import Blueprint, jsonify, request, session, abort, render_template
 
@@ -290,6 +291,16 @@ def install(app, get_db_connection, require_csrf):
                 linkedin_url TEXT DEFAULT '',
                 languages TEXT DEFAULT '',
                 cv_file_url TEXT DEFAULT '',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS cv_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT 'My CV',
+                template TEXT NOT NULL DEFAULT 'premium',
+                snapshot TEXT NOT NULL,
+                created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )""",
@@ -1069,6 +1080,110 @@ def install(app, get_db_connection, require_csrf):
         notify(conn, row["applicant_id"], "application_status", "Application status updated", new_status, "/platform/ui/workspace")
         conn.commit(); conn.close()
         return jsonify({"application_id":application_id,"status":new_status})
+
+    def build_profile_cv_data(conn, uid):
+        user = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        current = conn.execute("SELECT * FROM cv_profiles WHERE user_id=?", (uid,)).fetchone()
+        if not user:
+            return {}
+        data = dict(user)
+        if current:
+            data.update(dict(current))
+        # Keep the richer profile fields as the source of truth when building a CV.
+        for key in (
+            "name","gmail","photo","phone","location","bio","headline","occupation","company",
+            "website","education","skills","experience","achievements","interests","birth_date",
+            "university","student_id","study_status","department","academic_year","semester",
+            "projects","certifications","career_objective","references_text"
+        ):
+            data[key] = data.get(key) or ""
+        data["portfolio_url"] = data.get("portfolio_url") or data.get("website") or ""
+        return data
+
+    @bp.get("/cv/profile")
+    def get_cv_profile():
+        login_required()
+        conn = get_db_connection()
+        data = build_profile_cv_data(conn, user_id())
+        conn.close()
+        return jsonify({"profile": data})
+
+    @bp.get("/cv/documents")
+    def list_cv_documents():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT id,title,template,created_at,updated_at FROM cv_documents WHERE user_id=? ORDER BY updated_at DESC,id DESC",
+            (user_id(),)
+        ).fetchall()
+        conn.close()
+        return jsonify({"documents":[dict(x) for x in rows]})
+
+    @bp.post("/cv/documents")
+    def create_cv_document():
+        login_required(); require_csrf()
+        data = body()
+        title = str(data.get("title","My CV")).strip()[:120] or "My CV"
+        template = str(data.get("template","premium")).strip()[:40] or "premium"
+        conn = get_db_connection()
+        profile = build_profile_cv_data(conn, user_id())
+        # User may adjust CV-specific fields without changing the main profile.
+        allowed = {
+            "summary","education","experience","skills","projects","certifications",
+            "achievements","languages","portfolio_url","github_url","linkedin_url",
+            "career_objective","references_text","interests"
+        }
+        for key in allowed:
+            if key in data:
+                profile[key] = str(data.get(key) or "").strip()
+        snapshot = json.dumps(profile, ensure_ascii=False)
+        now = _now()
+        cur = conn.execute(
+            "INSERT INTO cv_documents(user_id,title,template,snapshot,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            (user_id(), title, template, snapshot, now, now)
+        )
+        document_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return created({"id":document_id,"title":title,"template":template,"status":"saved"})
+
+    @bp.get("/cv/documents/<int:document_id>")
+    def get_cv_document(document_id):
+        login_required()
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT id,user_id,title,template,snapshot,created_at,updated_at FROM cv_documents WHERE id=? AND user_id=?",
+            (document_id,user_id())
+        ).fetchone()
+        conn.close()
+        if not row:
+            return json_error("CV not found.",404)
+        return jsonify({
+            "document": {
+                "id":row["id"], "title":row["title"], "template":row["template"],
+                "created_at":row["created_at"], "updated_at":row["updated_at"],
+                "profile":json.loads(row["snapshot"] or "{}")
+            }
+        })
+
+    @bp.get("/cv/documents/<int:document_id>/view")
+    def view_cv_document(document_id):
+        login_required()
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT id,user_id,title,template,snapshot,created_at FROM cv_documents WHERE id=? AND user_id=?",
+            (document_id,user_id())
+        ).fetchone()
+        conn.close()
+        if not row:
+            return json_error("CV not found.",404)
+        profile = json.loads(row["snapshot"] or "{}")
+        profile["id"] = user_id()
+        return render_template(
+            "premium_cv_profile.html",
+            profile=profile, gallery=[], profile_posts=[],
+            is_own=True, saved_cv_title=row["title"], saved_cv_id=row["id"]
+        )
 
     @bp.post("/cv")
     def save_cv():
