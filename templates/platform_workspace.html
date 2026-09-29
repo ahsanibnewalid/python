@@ -27,15 +27,20 @@ a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);back
 </div>
 </section>
 
-<section id="cv" class="panel hidden"><div class="card"><div class="card-head"><div><h2>Professional CV</h2><p>Keep your profile ready before the right job appears.</p></div><span class="pill">Job-ready</span></div><form onsubmit="saveCV(event)"><div class="fields">
-<div class="wide"><label>Summary</label><textarea id="cv_summary"></textarea></div>
-<div><label>Education</label><textarea id="cv_education"></textarea></div><div><label>Experience</label><textarea id="cv_experience"></textarea></div>
-<div><label>Skills</label><textarea id="cv_skills"></textarea></div><div><label>Projects</label><textarea id="cv_projects"></textarea></div>
-<div><label>Certifications</label><textarea id="cv_certifications"></textarea></div><div><label>Achievements</label><textarea id="cv_achievements"></textarea></div>
-<div><label>Languages</label><input id="cv_languages"></div><div><label>Portfolio</label><input id="cv_portfolio"></div>
-<div><label>GitHub</label><input id="cv_github"></div><div><label>LinkedIn URL (user-entered)</label><input id="cv_linkedin"></div>
-<div class="wide"><label>CV file URL</label><input id="cv_file"></div>
-</div><button class="btn">Save CV</button></form></div></section>
+<section id="cv" class="panel hidden"><div class="grid">
+<div class="card wide"><div class="card-head"><div><h2>Professional CV</h2><p>CVs start from your existing profile. Saving creates a separate CV version in your profile.</p></div><span class="pill">Profile-connected</span></div>
+<form onsubmit="saveCV(event)"><div class="fields">
+<div class="wide"><label>CV title</label><input id="cv_title" placeholder="e.g. Software Engineer CV — 2026"></div>
+<div class="wide"><label>Professional summary</label><textarea id="cv_summary"></textarea></div>
+<div><label>Career objective</label><textarea id="cv_objective"></textarea></div><div><label>Education</label><textarea id="cv_education"></textarea></div>
+<div><label>Experience</label><textarea id="cv_experience"></textarea></div><div><label>Skills</label><textarea id="cv_skills"></textarea></div>
+<div><label>Projects</label><textarea id="cv_projects"></textarea></div><div><label>Certifications</label><textarea id="cv_certifications"></textarea></div>
+<div><label>Achievements</label><textarea id="cv_achievements"></textarea></div><div><label>Languages</label><input id="cv_languages"></div>
+<div><label>Portfolio</label><input id="cv_portfolio"></div><div><label>GitHub</label><input id="cv_github"></div>
+<div><label>LinkedIn URL (user-entered)</label><input id="cv_linkedin"></div><div><label>References</label><textarea id="cv_references"></textarea></div>
+</div><button class="btn">💾 Save as a new CV</button></form></div>
+<div class="card"><div class="card-head"><div><h2>📁 My saved CVs</h2><p>Every CV you create stays attached to your account.</p></div></div><div id="savedcvlist"><p class="muted">Loading your saved CVs…</p></div></div>
+</div></section>
 
 <section id="applications" class="panel hidden"><div class="card"><h2>My applications</h2><div id="applist"></div></div></section>
 <section id="messages" class="panel hidden"><div class="grid"><div class="card"><h2>Conversations</h2><div id="conversations"></div></div><div class="card"><h2>Conversation</h2><div id="messageslist"></div><form onsubmit="sendMessage(event)"><textarea id="messagebody" placeholder="Write a message"></textarea><button class="btn">Send</button></form></div></div></section>
@@ -97,8 +102,24 @@ async function updateApplication(id,status){if(!status)return;try{await api('/pl
 async function loadJobs(){const q=$('jobq').value.trim(),type=$('job_filter_type').value,mode=$('job_filter_mode').value;const d=await api('/platform/jobs');const rows=d.jobs.filter(j=>(!q||[j.title,j.organization_name,j.skills,j.description].join(' ').toLowerCase().includes(q.toLowerCase()))&&(!type||j.employment_type===type)&&(!mode||j.work_mode===mode));$('joblist').innerHTML=rows.map(j=>'<div class="item"><b>'+esc(j.title)+'</b> <span class="pill">'+esc(j.organization_name)+'</span><div class="muted">'+esc(j.location||'')+' · '+esc(j.work_mode)+' · '+esc(j.employment_type)+'</div><button class="btn" onclick="selectJob('+j.id+')">View</button></div>').join('')||'<p class="muted">No open jobs found.</p>'}
 async function selectJob(id){selectedJob=id;const d=await api('/platform/jobs/'+id);const j=d.job;$('jobdetail').innerHTML='<h3>'+esc(j.title)+'</h3><p><b>'+esc(j.organization_name)+'</b> · '+esc(j.location||'')+'</p><p>'+esc(j.description)+'</p><p><b>Requirements:</b> '+esc(j.requirements||'')+'</p><p><b>Skills:</b> '+esc(j.skills||'')+'</p><p class="muted">Deadline: '+esc(j.deadline||'Not specified')+'</p>'+(d.application?'<span class="pill">Already applied: '+esc(d.application.status)+'</span>':'');}
 async function applyJob(e){e.preventDefault();if(!selectedJob)return msg('Select a job first.',true);try{const d=await api('/platform/jobs/'+selectedJob+'/apply',{method:'POST',body:JSON.stringify({cover_letter:$('cover_letter').value,portfolio_url:$('portfolio_url').value})});msg('Application submitted. Conversation #'+d.conversation_id+' created.');loadApplications()}catch(e){msg(e.message,true)}}
-async function loadCV(){const d=await api('/platform/cv');const c=d.cv||{};[['cv_summary','summary'],['cv_education','education'],['cv_experience','experience'],['cv_skills','skills'],['cv_projects','projects'],['cv_certifications','certifications'],['cv_achievements','achievements'],['cv_languages','languages'],['cv_portfolio','portfolio_url'],['cv_github','github_url'],['cv_linkedin','linkedin_url'],['cv_file','cv_file_url']].forEach(x=>$(x[0]).value=c[x[1]]||'')}
-async function saveCV(e){e.preventDefault();const m={summary:$('cv_summary').value,education:$('cv_education').value,experience:$('cv_experience').value,skills:$('cv_skills').value,projects:$('cv_projects').value,certifications:$('cv_certifications').value,achievements:$('cv_achievements').value,languages:$('cv_languages').value,portfolio_url:$('cv_portfolio').value,github_url:$('cv_github').value,linkedin_url:$('cv_linkedin').value,cv_file_url:$('cv_file').value};try{await api('/platform/cv',{method:'POST',body:JSON.stringify(m)});msg('CV saved.')}catch(e){msg(e.message,true)}}
+async function loadCV(){
+  try{
+    const d=await api('/platform/cv/profile'),c=d.profile||{};
+    const map=[['cv_summary','bio'],['cv_education','education'],['cv_experience','experience'],['cv_skills','skills'],['cv_projects','projects'],['cv_certifications','certifications'],['cv_achievements','achievements'],['cv_languages','languages'],['cv_portfolio','portfolio_url'],['cv_github','github_url'],['cv_linkedin','linkedin_url'],['cv_objective','career_objective'],['cv_references','references_text']];
+    map.forEach(x=>$(x[0]).value=c[x[1]]||'');
+    $('cv_title').value='';
+    await loadSavedCVs();
+  }catch(e){msg(e.message,true)}
+}
+async function loadSavedCVs(){
+  const d=await api('/platform/cv/documents'),rows=d.documents||[];
+  $('savedcvlist').innerHTML=rows.map(x=>'<div class="item"><b>📄 '+esc(x.title)+'</b><div class="muted">'+esc(x.template)+' · Saved '+esc(x.updated_at)+'</div><a class="btn" href="/platform/cv/documents/'+x.id+'/view" target="_blank" rel="noopener">Open CV</a></div>').join('')||'<p class="muted">No saved CVs yet. Your first saved CV will appear here.</p>';
+}
+async function saveCV(e){
+  e.preventDefault();
+  const m={title:$('cv_title').value||'My CV',template:'premium',summary:$('cv_summary').value,education:$('cv_education').value,experience:$('cv_experience').value,skills:$('cv_skills').value,projects:$('cv_projects').value,certifications:$('cv_certifications').value,achievements:$('cv_achievements').value,languages:$('cv_languages').value,portfolio_url:$('cv_portfolio').value,github_url:$('cv_github').value,linkedin_url:$('cv_linkedin').value,career_objective:$('cv_objective').value,references_text:$('cv_references').value};
+  try{const d=await api('/platform/cv/documents',{method:'POST',body:JSON.stringify(m)});msg('CV saved to your profile.');$('cv_title').value='';await loadSavedCVs()}catch(e){msg(e.message,true)}
+}
 async function loadApplications(){const d=await api('/platform/applications');$('applist').innerHTML=d.applications.map(a=>'<div class="item"><b>'+esc(a.title||a.job_title)+'</b> <span class="pill">'+esc(a.status)+'</span><div class="muted">'+esc(a.organization_name)+' · '+esc(a.created_at)+'</div><button class="btn" onclick="viewApplication('+a.id+')">Details</button></div>').join('')||'<p class="muted">No applications yet.</p>'}
 async function viewApplication(id){const d=await api('/platform/applications/'+id);$('jobdetail').innerHTML='<h3>'+esc(d.application.job_title)+'</h3><p><b>'+esc(d.application.organization_name)+'</b> · <span class="pill">'+esc(d.application.status)+'</span></p>'+d.events.map(e=>'<div class="item">'+esc(e.from_status||'')+' → <b>'+esc(e.to_status)+'</b><div class="muted">'+esc(e.actor_name)+' · '+esc(e.created_at)+'</div><div>'+esc(e.note||'')+'</div></div>').join('')}
 async function loadConversations(){const d=await api('/platform/conversations');$('conversations').innerHTML=d.conversations.map(c=>'<div class="item"><b>'+esc(c.subject||'Conversation')+'</b><div class="muted">'+esc(c.last_message||'No messages')+'</div><button class="btn" onclick="openConversation('+c.id+')">Open</button></div>').join('')||'<p class="muted">No conversations yet.</p>'}
