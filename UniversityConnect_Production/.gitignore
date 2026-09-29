@@ -1,0 +1,9 @@
+database.db
+private_media/
+static/uploads/*
+!.gitkeep
+.flask_dev_session_secret
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
