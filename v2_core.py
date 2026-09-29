@@ -261,6 +261,21 @@ def install(app, get_db_connection, require_csrf):
                 FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )""",
+            """CREATE TABLE IF NOT EXISTS organization_duties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                assigned_to INTEGER NOT NULL,
+                assigned_by INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'assigned',
+                due_at TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT DEFAULT NULL,
+                FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY(assigned_to) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(assigned_by) REFERENCES users(id) ON DELETE CASCADE
+            )""",
             """CREATE TABLE IF NOT EXISTS cv_profiles (
                 user_id INTEGER PRIMARY KEY,
                 summary TEXT DEFAULT '',
@@ -781,6 +796,188 @@ def install(app, get_db_connection, require_csrf):
         )
         conn.commit(); conn.close()
         return created({"organization_id":organization_id,"user_id":target,"role":role})
+
+    @bp.get("/organizations/my-duties")
+    def my_org_duties():
+        login_required()
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT d.id,d.title,d.description,d.status,d.due_at,d.created_at,
+                      o.id organization_id,o.name organization_name
+               FROM organization_duties d JOIN organizations o ON o.id=d.organization_id
+               WHERE d.assigned_to=? AND o.status='active'
+               ORDER BY CASE WHEN d.status='assigned' THEN 0 ELSE 1 END,d.created_at DESC""",
+            (user_id(),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"duties":[dict(x) for x in rows]})
+
+    @bp.get("/organizations/<int:organization_id>/office")
+    def organization_office(organization_id):
+        login_required()
+        conn = get_db_connection()
+        membership = conn.execute(
+            """SELECT m.role,m.title,u.name,u.email,o.name organization_name,o.industry,o.description
+               FROM organization_memberships m
+               JOIN organizations o ON o.id=m.organization_id
+               JOIN users u ON u.id=m.user_id
+               WHERE m.organization_id=? AND m.user_id=? AND m.status='active'""",
+            (organization_id, user_id()),
+        ).fetchone()
+        if not membership or not can_organization(user_id(), organization_id, "organization.manage"):
+            conn.close()
+            abort(403)
+        members = conn.execute(
+            """SELECT m.user_id,m.role,m.title,m.status,u.name,u.email
+               FROM organization_memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.organization_id=? AND m.status='active'
+               ORDER BY CASE WHEN m.role='organization_owner' THEN 0 ELSE 1 END,u.name""",
+            (organization_id,),
+        ).fetchall()
+        duties = conn.execute(
+            """SELECT d.id,d.title,d.description,d.status,d.due_at,d.created_at,d.completed_at,
+                      d.assigned_to,d.assigned_by,u.name assigned_to_name
+               FROM organization_duties d JOIN users u ON u.id=d.assigned_to
+               WHERE d.organization_id=? ORDER BY CASE WHEN d.status='assigned' THEN 0 ELSE 1 END,d.created_at DESC""",
+            (organization_id,),
+        ).fetchall()
+        conn.close()
+        return render_template(
+            "platform_company_management.html",
+            organization_id=organization_id,
+            organization=dict(membership),
+            members=[dict(x) for x in members],
+            duties=[dict(x) for x in duties],
+            roles=sorted(ORGANIZATION_DELEGABLE.get(membership["role"], set())),
+        )
+
+    @bp.get("/organizations/<int:organization_id>/members/search")
+    def organization_member_search(organization_id):
+        login_required()
+        if not can_organization(user_id(), organization_id, "role.manage"):
+            abort(403)
+        q = str(request.args.get("q", "")).strip()
+        if len(q) < 2:
+            return jsonify({"users":[]})
+        like = "%" + q + "%"
+        conn = get_db_connection()
+        rows = conn.execute(
+            """SELECT id,name,email FROM users
+               WHERE (name LIKE ? OR email LIKE ?) AND id != ?
+               ORDER BY name LIMIT 20""",
+            (like, like, user_id()),
+        ).fetchall()
+        conn.close()
+        return jsonify({"users":[dict(x) for x in rows]})
+
+    @bp.post("/organizations/<int:organization_id>/members/<int:target_user_id>/role")
+    def assign_org_role(organization_id, target_user_id):
+        login_required(); require_csrf()
+        data = body()
+        role = str(data.get("role", "employee")).strip()
+        title = str(data.get("title", "")).strip()
+        if role not in ROLE_PERMISSIONS:
+            return json_error("Unknown company role.")
+        if not can_organization(user_id(), organization_id, "role.manage"):
+            return json_error("Role management permission required.", 403)
+        if not can_assign_role(user_id(), "organization_memberships", "organization_id", organization_id, role):
+            return json_error("Your company role cannot delegate this role.", 403)
+        conn = get_db_connection()
+        target = conn.execute("SELECT id,name FROM users WHERE id=?", (target_user_id,)).fetchone()
+        if not target:
+            conn.close()
+            return json_error("User not found.", 404)
+        conn.execute(
+            "UPDATE organization_memberships SET status='inactive' WHERE organization_id=? AND user_id=?",
+            (organization_id, target_user_id),
+        )
+        conn.execute(
+            """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
+               VALUES(?,?,?,?, 'active',?)
+               ON CONFLICT(organization_id,user_id,role) DO UPDATE SET title=excluded.title,status='active',created_at=excluded.created_at""",
+            (organization_id, target_user_id, role, title, _now()),
+        )
+        notify(conn, target_user_id, "organization_role", "Company role assigned",
+               "You are now " + (title or role.replace("_", " ").title()) + ".", "/platform/organizations/" + str(organization_id) + "/office")
+        conn.commit(); conn.close()
+        return jsonify({"ok":True,"user_id":target_user_id,"role":role,"title":title})
+
+    @bp.post("/organizations/<int:organization_id>/members/<int:target_user_id>/remove")
+    def remove_org_member(organization_id, target_user_id):
+        login_required(); require_csrf()
+        if not can_organization(user_id(), organization_id, "role.manage"):
+            return json_error("Role management permission required.", 403)
+        conn = get_db_connection()
+        owner = conn.execute(
+            "SELECT role FROM organization_memberships WHERE organization_id=? AND user_id=? AND status='active'",
+            (organization_id, target_user_id),
+        ).fetchone()
+        if not owner:
+            conn.close()
+            return json_error("Member not found.", 404)
+        if owner["role"] == "organization_owner":
+            conn.close()
+            return json_error("The company owner cannot be removed.", 400)
+        conn.execute(
+            "UPDATE organization_memberships SET status='inactive' WHERE organization_id=? AND user_id=?",
+            (organization_id, target_user_id),
+        )
+        notify(conn, target_user_id, "organization_membership", "Company membership ended",
+               "Your active membership in this organization was removed.", "/platform/ui/workspace")
+        conn.commit(); conn.close()
+        return jsonify({"ok":True})
+
+    @bp.post("/organizations/<int:organization_id>/duties")
+    def create_org_duty(organization_id):
+        login_required(); require_csrf()
+        if not can_organization(user_id(), organization_id, "organization.manage"):
+            return json_error("Office management permission required.", 403)
+        data = body()
+        title = str(data.get("title", "")).strip()
+        target = int(data.get("assigned_to", 0) or 0)
+        if not title or not target:
+            return json_error("Duty title and employee are required.")
+        conn = get_db_connection()
+        member = conn.execute(
+            "SELECT user_id FROM organization_memberships WHERE organization_id=? AND user_id=? AND status='active'",
+            (organization_id, target),
+        ).fetchone()
+        if not member:
+            conn.close()
+            return json_error("The selected person is not an active company member.", 400)
+        cur = conn.execute(
+            """INSERT INTO organization_duties
+               (organization_id,assigned_to,assigned_by,title,description,due_at,created_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (organization_id,target,user_id(),title,str(data.get("description","")).strip(),
+             data.get("due_at") or None,_now()),
+        )
+        duty_id = cur.lastrowid
+        notify(conn, target, "organization_duty", "New office duty assigned",
+               title, "/platform/organizations/" + str(organization_id) + "/office")
+        conn.commit(); conn.close()
+        return created({"id":duty_id,"title":title,"assigned_to":target})
+
+    @bp.post("/organizations/<int:organization_id>/duties/<int:duty_id>/complete")
+    def complete_org_duty(organization_id, duty_id):
+        login_required(); require_csrf()
+        conn = get_db_connection()
+        duty = conn.execute(
+            "SELECT id,assigned_to FROM organization_duties WHERE id=? AND organization_id=?",
+            (duty_id, organization_id),
+        ).fetchone()
+        if not duty:
+            conn.close()
+            return json_error("Duty not found.",404)
+        if duty["assigned_to"] != user_id() and not can_organization(user_id(), organization_id, "organization.manage"):
+            conn.close()
+            return json_error("You cannot update this duty.",403)
+        conn.execute(
+            "UPDATE organization_duties SET status='completed',completed_at=? WHERE id=?",
+            (_now(), duty_id),
+        )
+        conn.commit(); conn.close()
+        return jsonify({"ok":True,"status":"completed"})
 
     @bp.post("/organizations/<int:organization_id>/jobs")
     def create_job(organization_id):

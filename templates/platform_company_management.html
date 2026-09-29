@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ organization.organization_name }} · Office Management</title>
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:#f4f7fb;color:#172033}.wrap{max-width:1200px;margin:auto;padding:24px}.hero,.card{background:#fff;border:1px solid #e5eaf2;border-radius:18px;padding:20px;box-shadow:0 5px 20px rgba(23,32,51,.05)}.hero{background:linear-gradient(135deg,#102a5b,#1456c4);color:#fff;margin-bottom:16px}.hero h1{margin:5px 0}.muted{color:#667085;font-size:13px}.hero .muted{color:#dce8ff}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.wide{grid-column:1/-1}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}.stat{background:rgba(255,255,255,.12);padding:12px;border-radius:12px}.stat b{display:block;font-size:20px}.item{padding:12px 0;border-top:1px solid #edf0f4}.item:first-child{border-top:0}.pill{display:inline-block;background:#eef4ff;color:#1456c4;border-radius:99px;padding:4px 8px;font-size:11px;font-weight:800}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #d5dce8;border-radius:10px;padding:10px;font:inherit}textarea{min-height:75px}label{font-size:12px;font-weight:800;display:block;margin:8px 0 5px}.btn{border:0;border-radius:10px;padding:10px 14px;background:#1456c4;color:#fff;font-weight:800;cursor:pointer}.btn.danger{background:#b42318}.btn.light{background:#edf3ff;color:#1456c4}.flash{padding:10px 0;font-weight:800}.result{background:#f7f9fd;border-radius:10px;padding:9px;margin-top:6px;cursor:pointer}@media(max-width:800px){.grid,.fields{grid-template-columns:1fr}.wide{grid-column:auto}.stats{grid-template-columns:repeat(2,1fr)}}
+</style></head><body>
+<main class="wrap">
+<section class="hero">
+<div>🏢 COMPANY / OFFICE</div><h1>{{ organization.organization_name }}</h1>
+<div class="muted">{{ organization.industry or 'Organization' }} · {{ organization.role|replace('_',' ')|title }}{% if organization.title %} · {{ organization.title }}{% endif %}</div>
+<p>{{ organization.description or 'Manage your people, office roles, duties and recruitment from one place.' }}</p>
+<div class="stats"><div class="stat"><b>{{ members|length }}</b>Team members</div><div class="stat"><b>{{ duties|length }}</b>Duties</div><div class="stat"><b>{{ members|selectattr('role','equalto','hr_manager')|list|length }}</b>HR</div><div class="stat"><b>{{ members|selectattr('role','equalto','recruiter')|list|length }}</b>Recruiters</div></div>
+</section>
+<div id="flash" class="flash"></div>
+<div class="grid">
+<section class="card">
+<h2>👥 Add a person from this platform</h2><p class="muted">Search an existing user, then give them an office role. They do not need a separate company account.</p>
+<label>Search name or email</label><input id="search" placeholder="Type at least 2 characters" oninput="searchUsers()"><div id="results"></div>
+<label>Role</label><select id="role">{% for role in roles %}<option value="{{ role }}">{{ role|replace('_',' ')|title }}</option>{% endfor %}</select>
+<label>Official title</label><input id="title" placeholder="e.g. Head of HR, Office Manager">
+<input type="hidden" id="target">
+<button class="btn" onclick="assignRole()">Assign office role</button>
+</section>
+
+<section class="card">
+<h2>📋 Create an office duty</h2><p class="muted">Give a specific responsibility to a current team member. They will see it in their own workspace.</p>
+<label>Team member</label><select id="duty_user">{% for m in members %}<option value="{{ m.user_id }}">{{ m.name }} — {{ m.role|replace('_',' ')|title }}</option>{% endfor %}</select>
+<label>Duty title</label><input id="duty_title" placeholder="e.g. Prepare monthly payroll">
+<label>Description</label><textarea id="duty_description" placeholder="What needs to be done?"></textarea>
+<label>Due date</label><input id="duty_due" type="datetime-local">
+<button class="btn" onclick="createDuty()">Assign duty</button>
+</section>
+
+<section class="card wide">
+<h2>👔 People & office roles</h2>
+<p class="muted">The owner can distribute responsibilities across HR, recruitment, office management, accounts, media and team leadership.</p>
+<div id="members">{% for m in members %}<div class="item"><b>{{ m.name }}</b> <span class="pill">{{ m.role|replace('_',' ')|title }}</span>{% if m.title %}<span class="muted"> · {{ m.title }}</span>{% endif %}<div class="muted">{{ m.email }}</div>{% if m.role != 'organization_owner' %}<button class="btn light" onclick="removeMember({{ m.user_id }})">Remove from company</button>{% endif %}</div>{% endfor %}</div>
+</section>
+
+<section class="card wide">
+<h2>🗂 Office duties</h2>
+<div id="duties">{% for d in duties %}<div class="item"><b>{{ d.title }}</b> <span class="pill">{{ d.status|title }}</span><div class="muted">Assigned to {{ d.assigned_to_name }}{% if d.due_at %} · Due {{ d.due_at }}{% endif %}</div>{% if d.description %}<div>{{ d.description }}</div>{% endif %}{% if d.status != 'completed' %}<button class="btn light" onclick="completeDuty({{ d.id }})">Mark completed</button>{% endif %}</div>{% else %}<p class="muted">No duties assigned yet.</p>{% endfor %}</div>
+</section>
+</div>
+</main>
+<script>
+const csrf="{{ csrf_token() }}"; const org={{ organization_id }};
+const $=id=>document.getElementById(id);
+async function api(url,opt={}){opt.headers=Object.assign({'X-CSRF-Token':csrf,'Content-Type':'application/json'},opt.headers||{});const r=await fetch(url,opt);const d=await r.json().catch(()=>({error:'Invalid response'}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
+function flash(t,bad=false){$('flash').textContent=t;$('flash').style.color=bad?'#b42318':'#087443';}
+let timer;
+async function searchUsers(){clearTimeout(timer);const q=$('search').value.trim();if(q.length<2){$('results').innerHTML='';return}timer=setTimeout(async()=>{try{const d=await api('/platform/organizations/'+org+'/members/search?q='+encodeURIComponent(q));$('results').innerHTML=(d.users||[]).map(u=>'<div class="result" onclick="pickUser('+u.id+',\''+esc(u.name)+'\')"><b>'+esc(u.name)+'</b><div class="muted">'+esc(u.email)+'</div></div>').join('')||'<div class="muted">No matching platform user.</div>'}catch(e){flash(e.message,true)}},250)}
+function pickUser(id,name){$('target').value=id;$('search').value=name;$('results').innerHTML='<div class="pill">Selected user #'+id+'</div>'}
+async function assignRole(){const id=$('target').value;if(!id)return flash('Search and select a platform user first.',true);try{await api('/platform/organizations/'+org+'/members/'+id+'/role',{method:'POST',body:JSON.stringify({role:$('role').value,title:$('title').value})});flash('Office role assigned.');setTimeout(()=>location.reload(),500)}catch(e){flash(e.message,true)}}
+async function createDuty(){try{await api('/platform/organizations/'+org+'/duties',{method:'POST',body:JSON.stringify({assigned_to:$('duty_user').value,title:$('duty_title').value,description:$('duty_description').value,due_at:$('duty_due').value})});flash('Duty assigned.');setTimeout(()=>location.reload(),500)}catch(e){flash(e.message,true)}}
+async function completeDuty(id){try{await api('/platform/organizations/'+org+'/duties/'+id+'/complete',{method:'POST',body:'{}'});flash('Duty completed.');setTimeout(()=>location.reload(),400)}catch(e){flash(e.message,true)}}
+async function removeMember(id){if(!confirm('Remove this person from the company?'))return;try{await api('/platform/organizations/'+org+'/members/'+id+'/remove',{method:'POST',body:'{}'});flash('Member removed.');setTimeout(()=>location.reload(),400)}catch(e){flash(e.message,true)}}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+</script></body></html>
