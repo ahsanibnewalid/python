@@ -1268,7 +1268,7 @@ def user_login():
             session["user_id"] = user["id"]
             session.permanent = True
             session.modified = True
-            return redirect(url_for("user_home"))
+            return redirect(url_for("landing"))
         error = "Invalid username, Gmail, phone number or password."
     return render_template("user_login.html", error=error)
 
@@ -2936,7 +2936,7 @@ def admin_control_center():
         except Exception as e:
             conn.rollback(); flash(str(e),"error")
     stats={"users":conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],"posts":conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0],"reels":conn.execute("SELECT COUNT(*) FROM posts WHERE post_type='reel'").fetchone()[0],"messages":conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],"resources":conn.execute("SELECT COUNT(*) FROM study_resources WHERE status='published'").fetchone()[0],"resource_stars":conn.execute("SELECT COUNT(*) FROM resource_stars").fetchone()[0],"companies":conn.execute("SELECT COUNT(*) FROM organizations WHERE organization_type='company'").fetchone()[0],"jobs":conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],"open_jobs":conn.execute("SELECT COUNT(*) FROM jobs WHERE status='open'").fetchone()[0],"institutions":conn.execute("SELECT COUNT(*) FROM institutions").fetchone()[0],"reports":conn.execute("SELECT COUNT(*) FROM message_reports").fetchone()[0]}
-    recent_users=conn.execute("SELECT id,name,username,gmail,created_at FROM users ORDER BY id DESC LIMIT 12").fetchall()
+    recent_users=conn.execute("SELECT id,name,username,gmail FROM users ORDER BY id DESC LIMIT 12").fetchall()
     recent_posts=conn.execute("SELECT p.id,p.post_type,p.caption,p.created_at,u.name user_name,u.id user_id FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.id DESC LIMIT 12").fetchall()
     recent_resources=conn.execute("SELECT r.id,r.title,r.resource_type,r.created_at,u.name author_name FROM study_resources r JOIN users u ON u.id=r.author_id ORDER BY r.id DESC LIMIT 12").fetchall()
     recent_jobs=conn.execute("SELECT j.id,j.title,j.status,o.name organization_name FROM jobs j JOIN organizations o ON o.id=j.organization_id ORDER BY j.id DESC LIMIT 12").fetchall()
@@ -2982,11 +2982,24 @@ def admin_backup():
 # Dashboard
 # ---------------------------------------------------------
 
+def is_mobile_browser():
+    """Return True for phone/tablet user agents so mobile keeps the social-first home."""
+    ua = (request.headers.get("User-Agent") or "").lower()
+    return bool(re.search(r"android|iphone|ipad|ipod|mobile|tablet|windows phone", ua))
+
+
+def preferred_user_home():
+    """Workspace-first on desktop/laptop; social + reels-first on mobile."""
+    if is_mobile_browser():
+        return url_for("user_home")
+    return url_for("v2.workspace")
+
+
 @app.route("/")
 def landing():
-    """Public entry point: authenticated users land in the unified dashboard."""
+    """Authenticated users get the device-appropriate primary experience."""
     if user_required():
-        return redirect(url_for("unified_dashboard"))
+        return redirect(preferred_user_home())
     return redirect(url_for("user_login"))
 
 
@@ -2994,6 +3007,9 @@ def landing():
 def unified_dashboard():
     if not user_required():
         return redirect(url_for("user_login"))
+    # Keep the unified dashboard URL for compatibility, but make the requested
+    # device-specific home the default destination.
+    return redirect(preferred_user_home())
     uid=session["user_id"]
     conn=get_db_connection()
     current_user=conn.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
