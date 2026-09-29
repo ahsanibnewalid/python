@@ -27,6 +27,8 @@ ROLE_PERMISSIONS = {
     "hr_manager": {"job.create", "application.review"},
     "recruiter": {"job.create", "application.review"},
     "media_manager": {"notice.publish"},
+    "accounts": set(),
+    "team_leader": {"notice.publish"},
     "employee": set(),
 }
 
