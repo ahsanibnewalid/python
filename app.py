@@ -25,6 +25,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from v2_core import install as install_v2_core
 
 
 app = Flask(__name__)
@@ -3718,6 +3719,11 @@ def too_large(error):
 def server_error(error):
     return render_template("error.html", code=500, title="Server error", message="An unexpected error occurred."), 500
 
+
+# ---------------------------------------------------------
+# University Connect education + career platform layer
+# ---------------------------------------------------------
+install_v2_core(app, get_db_connection, require_csrf)
 
 # ---------------------------------------------------------
 # Run

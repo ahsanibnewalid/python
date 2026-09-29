@@ -2,7 +2,7 @@ import ast
 import pathlib
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[1] / "UniversityConnect_Production"
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 V2 = ROOT / "v2_core.py"
 WORKSPACE = ROOT / "templates" / "platform_workspace.html"
 
@@ -65,3 +65,8 @@ class PlatformV2StaticTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_root_app_bootstrap(self):
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("install_v2_core(app, get_db_connection, require_csrf)", app_source)
+        self.assertIn("from v2_core import install as install_v2_core", app_source)

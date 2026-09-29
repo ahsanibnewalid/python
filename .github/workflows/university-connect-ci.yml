@@ -8,9 +8,6 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: UniversityConnect_Production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,9 +21,9 @@ import pathlib
 from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
 root = pathlib.Path("templates")
 env = Environment(loader=FileSystemLoader(str(root)))
-for path in root.glob("*.html"):
+for path in root.rglob("*.html"):
     try:
-        env.get_template(path.name)
+        env.get_template(str(path.relative_to(root)))
     except TemplateSyntaxError as exc:
         raise SystemExit(f"{path}: {exc}")
 print("All templates compile.")
