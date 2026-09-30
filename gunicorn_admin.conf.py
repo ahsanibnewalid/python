@@ -17,6 +17,3 @@ def post_worker_init(worker):
         app_module.get_db_connection,
         getattr(app_module, "init_db", None),
     )
-
-    from admin_notifications_bridge import install as install_admin_notifications
-    install_admin_notifications(app_module.app, app_module.get_db_connection)
