@@ -954,9 +954,10 @@ def install(app, get_db_connection, require_csrf):
             (iid,user_id(),"institution_owner","Owner",_now(),user_id(),_now())
         )
         space_id = ensure_space(conn, "institution", iid, name, user_id(), "pending")
+        slug_row = conn.execute("SELECT slug FROM platform_spaces WHERE id=?", (space_id,)).fetchone()
         conn.commit()
         conn.close()
-        return created({"id": iid, "name": name, "role": "institution_owner", "space_id": space_id, "public_url": f"/platform/s/{slugify(name)}"})
+        return created({"id": iid, "name": name, "role": "institution_owner", "space_id": space_id, "public_url": f"/platform/s/{slug_row['slug']}"})
 
     @bp.post("/institutions/<int:institution_id>/members")
     def add_institution_member(institution_id):
@@ -1384,8 +1385,9 @@ def install(app, get_db_connection, require_csrf):
             (oid,user_id(),"organization_owner","Owner","active",_now(),user_id(),_now())
         )
         space_id=ensure_space(conn,"organization",oid,name,user_id(),"pending")
+        slug_row=conn.execute("SELECT slug FROM platform_spaces WHERE id=?", (space_id,)).fetchone()
         conn.commit(); conn.close()
-        return created({"id":oid,"name":name,"role":"organization_owner","space_id":space_id,"public_url":f"/platform/s/{slugify(name)}"})
+        return created({"id":oid,"name":name,"role":"organization_owner","space_id":space_id,"public_url":f"/platform/s/{slug_row['slug']}"})
 
     @bp.post("/organizations/<int:organization_id>/members")
     def add_org_member(organization_id):
@@ -2356,7 +2358,7 @@ def install(app, get_db_connection, require_csrf):
             cur=conn.execute(
                 """INSERT INTO space_membership_requests
                    (space_id,user_id,requested_role,requested_title,department_id,proof_kind,proof_token,proof_original_name,proof_note,status,submitted_at)
-                   VALUES(?,?,?,?,?,?,?,?,'identity_proof','pending',?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,'pending',?)""",
                 (space["id"],user_id(),role,title,department_id,"work_or_study",proof_token,proof_original,note,now),
             )
             request_id=cur.lastrowid
