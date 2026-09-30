@@ -45,6 +45,41 @@ class PlatformV2StaticTests(unittest.TestCase):
         ):
             self.assertIn(route, self.source)
 
+
+    def test_trust_based_public_space_and_membership_workflows_exist(self):
+        for route in (
+            '@bp.get("/s/<string:slug>")',
+            '@bp.post("/s/<string:slug>/membership-request")',
+            '@bp.get("/s/<string:slug>/membership-requests")',
+            '@bp.get("/s/<string:slug>/membership-requests/<int:request_id>/proof")',
+            '@bp.post("/s/<string:slug>/membership-requests/<int:request_id>/decision")',
+            '@bp.post("/s/<string:slug>/updates")',
+        ):
+            self.assertIn(route, self.source)
+        for table in (
+            "platform_spaces", "space_updates", "space_membership_requests",
+            "space_verification_events",
+        ):
+            self.assertIn("CREATE TABLE IF NOT EXISTS " + table, self.source)
+        for marker in (
+            "verification_status",
+            "proof_token",
+            "proof_original_name",
+            "membership_approved",
+            "membership_rejected",
+            "save_verification_proof",
+            "ensure_space",
+        ):
+            self.assertIn(marker, self.source)
+
+    def test_registration_supports_organization_page_creation(self):
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        register = (ROOT / "templates" / "register.html").read_text(encoding="utf-8")
+        self.assertIn('account_mode = request.form.get("account_mode", "individual")', app_source)
+        self.assertIn("platform_spaces", app_source)
+        for marker in ("organization_name", "organization_type", "organization_proof", "organizationMode"):
+            self.assertIn(marker, register)
+
     def test_workspace_exists(self):
         self.assertTrue(WORKSPACE.exists())
         text = WORKSPACE.read_text(encoding="utf-8")
