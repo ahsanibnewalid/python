@@ -1440,16 +1440,30 @@ def user_home():
             SELECT id, name, gmail, photo, username, nickname, relationship_status
             FROM users
             WHERE id != ? {uni_clause}
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_blocks b
+                  WHERE (b.blocker_id=? AND b.blocked_id=users.id)
+                     OR (b.blocker_id=users.id AND b.blocked_id=?)
+              )
               AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
             ORDER BY name COLLATE NOCASE
+            LIMIT 50
             """,
-            (user_id, *uni_params, f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%")
+            (user_id, *uni_params, user_id, user_id, f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%")
         ).fetchall()
     else:
         users = conn.execute(
             f"""SELECT id, name, gmail, photo, username, nickname, relationship_status
-            FROM users WHERE id != ? {uni_clause} ORDER BY name COLLATE NOCASE""",
-            (user_id, *uni_params)
+            FROM users
+            WHERE id != ? {uni_clause}
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_blocks b
+                  WHERE (b.blocker_id=? AND b.blocked_id=users.id)
+                     OR (b.blocker_id=users.id AND b.blocked_id=?)
+              )
+            ORDER BY name COLLATE NOCASE
+            LIMIT 50""",
+            (user_id, *uni_params, user_id, user_id)
         ).fetchall()
 
     unread_count = conn.execute(
