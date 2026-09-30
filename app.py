@@ -2746,6 +2746,15 @@ def register_event(event_id):
     return jsonify({"registered":registered})
 
 
+@app.route("/notifications")
+def notification_center():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    conn=get_db_connection()
+    profile=conn.execute("SELECT * FROM users WHERE id=?",(session["user_id"],)).fetchone()
+    conn.close()
+    return render_template("notifications.html", current_user=profile, site_name=get_site_name())
+
 @app.route("/notifications/<int:notification_id>/read", methods=["POST"])
 def mark_notification_read(notification_id):
     if not user_required(): return jsonify({"error":"login_required"}), 401
