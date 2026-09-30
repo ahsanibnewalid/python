@@ -1,4 +1,4 @@
-# University Connect Render blueprint: persistent Postgres + stateless web service.
+# University Connect Render blueprint: persistent PostgreSQL + stateless web service.
 services:
   - type: web
     name: university-connect
@@ -16,11 +16,9 @@ services:
           property: connectionString
       - key: FLASK_SECRET_KEY
         generateValue: true
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
       - key: ADMIN_USER
         value: admin
-      - key: ADMIN_BOOTSTRAP_TOKEN
+      - key: ADMIN_PASSWORD
         sync: false
       - key: TRUST_PROXY
         value: "1"
@@ -33,7 +31,7 @@ services:
       - key: BILLING_PROVIDER
         value: none
       - key: MEDIA_STORAGE
-        value: local
+        value: s3
       - key: MEDIA_S3_BUCKET
         sync: false
       - key: MEDIA_S3_ENDPOINT
