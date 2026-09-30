@@ -3918,12 +3918,7 @@ def view_profile(user_id):
                 if not filename:
                     continue
 
-                file.save(
-                    os.path.join(
-                        app.config["UPLOAD_FOLDER"],
-                        filename
-                    )
-                )
+                save_public_upload(file, filename)
 
                 conn.execute(
                     """
