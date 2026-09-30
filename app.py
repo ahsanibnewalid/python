@@ -1330,6 +1330,11 @@ def valid_gmail(value):
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    account_mode = request.form.get("account_mode", "individual").strip().lower() if request.method == "POST" else "individual"
+    if account_mode not in {"individual", "organization"}:
+        account_mode = "individual"
+    education_types = {"university","college","school","institute","coaching_center","training_center"}
+
     if request.method == "POST":
         require_csrf()
         name = request.form.get("name", "").strip()
@@ -1339,25 +1344,48 @@ def register():
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
         file = request.files.get("photo")
+        entity_name = request.form.get("organization_name", "").strip()
+        entity_type = request.form.get("organization_type", "company").strip().lower()
+        entity_industry = request.form.get("organization_industry", "").strip()
+        entity_domain = request.form.get("organization_domain", "").strip().lower()
+        entity_description = request.form.get("organization_description", "").strip()
+        proof = request.files.get("organization_proof")
 
         if not name or not username or not gmail or not phone or not password:
             flash("Name, username, Gmail, phone number and password are required.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
         if not valid_gmail(gmail):
             flash("Please enter a valid Gmail address ending in @gmail.com.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
         if not valid_phone(phone):
             flash("Please enter a valid international phone number with its country code.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
         if len(password) < 6:
             flash("Password must be at least 6 characters.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
         if password != confirm_password:
             flash("Passwords do not match.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
+        if account_mode == "organization":
+            allowed_types = education_types | {"company","it_firm","office","hospital","clinic","ngo","government","other"}
+            if entity_type not in allowed_types:
+                flash("Choose a valid organization or institution type.", "error")
+                return render_template("register.html", account_mode=account_mode)
+            if not entity_name:
+                flash("Organization/institution name is required.", "error")
+                return render_template("register.html", account_mode=account_mode)
+            if not proof or not proof.filename:
+                flash("The organization owner must provide an identity/organization proof document.", "error")
+                return render_template("register.html", account_mode=account_mode)
+            proof_name = secure_filename(proof.filename)
+            proof_ext = proof_name.rsplit(".", 1)[-1].lower() if "." in proof_name else ""
+            if proof_ext not in {"pdf","jpg","jpeg","png","webp"}:
+                flash("Organization proof must be PDF, JPG, JPEG, PNG or WEBP.", "error")
+                return render_template("register.html", account_mode=account_mode)
 
         conn = get_db_connection()
         saved_filename = None
+        saved_proof = None
         try:
             existing = conn.execute(
                 "SELECT id FROM users WHERE lower(gmail) = ? OR lower(username) = ? OR phone = ?",
@@ -1365,17 +1393,17 @@ def register():
             ).fetchone()
             if existing:
                 flash("That Gmail, username or phone number is already registered.", "error")
-                return render_template("register.html")
+                return render_template("register.html", account_mode=account_mode)
 
             filename = "default_profile.png"
             if file and file.filename:
                 if not allowed_file(file.filename) or not validate_image_signature(file):
                     flash("Invalid profile image format.", "error")
-                    return render_template("register.html")
+                    return render_template("register.html", account_mode=account_mode)
                 filename = generate_unique_filename(file.filename, prefix="profile")
                 if not filename:
                     flash("The profile photo could not be prepared. Please try another image.", "error")
-                    return render_template("register.html")
+                    return render_template("register.html", account_mode=account_mode)
                 save_public_upload(file, filename)
                 saved_filename = filename
 
@@ -1383,25 +1411,89 @@ def register():
                 "INSERT INTO users (name, gmail, phone, photo, username, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
                 (name, gmail, phone, filename, username, generate_password_hash(password))
             )
+            new_user_id = cursor.lastrowid
+
+            public_url = None
+            if account_mode == "organization":
+                token = secrets.token_urlsafe(36)
+                save_private_media(proof, token, proof_name)
+                saved_proof = (token, proof_name)
+                now = datetime.utcnow().isoformat()
+                if entity_type in education_types:
+                    cur = conn.execute(
+                        """INSERT INTO institutions(name,institution_type,domain,description,verification_status,created_at)
+                           VALUES(?,?,?,?,?,?)""",
+                        (entity_name,entity_type,entity_domain,entity_description,"pending",now),
+                    )
+                    entity_id = cur.lastrowid
+                    conn.execute(
+                        """INSERT INTO institution_memberships
+                           (institution_id,user_id,role,title,status,verification_status,verified_at,verified_by,
+                            proof_kind,proof_token,proof_original_name,verification_note,created_at)
+                           VALUES(?,?,?,?, 'active','pending',NULL,NULL,?,?,?,?,?)""",
+                        (entity_id,new_user_id,"institution_owner","Founder","founder_identity",token,proof_name,"Awaiting platform verification.",now),
+                    )
+                    kind = "institution"
+                    space_name = entity_name
+                else:
+                    cur = conn.execute(
+                        """INSERT INTO organizations(name,organization_type,industry,domain,description,verification_status,created_at)
+                           VALUES(?,?,?,?,?,?,?)""",
+                        (entity_name,entity_type,entity_industry,entity_domain,entity_description,"pending",now),
+                    )
+                    entity_id = cur.lastrowid
+                    conn.execute(
+                        """INSERT INTO organization_memberships
+                           (organization_id,user_id,role,title,status,verification_status,verified_at,verified_by,
+                            proof_kind,proof_token,proof_original_name,verification_note,created_at)
+                           VALUES(?,?,?,?, 'active','pending',NULL,NULL,?,?,?,?,?)""",
+                        (entity_id,new_user_id,"organization_owner","Founder","founder_identity",token,proof_name,"Awaiting platform verification.",now),
+                    )
+                    kind = "organization"
+                    space_name = entity_name
+
+                base_slug = re.sub(r"[^a-z0-9]+","-",entity_name.lower()).strip("-") or "space"
+                slug = base_slug
+                suffix = 2
+                while conn.execute("SELECT 1 FROM platform_spaces WHERE slug=? LIMIT 1",(slug,)).fetchone():
+                    slug = f"{base_slug}-{suffix}"
+                    suffix += 1
+                if kind == "institution":
+                    conn.execute(
+                        """INSERT INTO platform_spaces
+                           (kind,institution_id,slug,display_name,verification_status,created_by,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?)""",
+                        (kind,entity_id,slug,space_name,"pending",new_user_id,now,now),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT INTO platform_spaces
+                           (kind,organization_id,slug,display_name,verification_status,created_by,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?)""",
+                        (kind,entity_id,slug,space_name,"pending",new_user_id,now,now),
+                    )
+                public_url = "/platform/s/" + slug
+
             conn.commit()
         except Exception as exc:
             conn.rollback()
             if saved_filename:
-                try:
-                    os.remove(os.path.join(app.config["UPLOAD_FOLDER"], saved_filename))
-                except OSError:
-                    pass
+                delete_public_upload(saved_filename)
+            if saved_proof:
+                remove_private_media(saved_proof[0], saved_proof[1])
             app.logger.exception("Account creation failed")
             flash("Account creation failed. Please try again. If the problem continues, contact the administrator.", "error")
-            return render_template("register.html")
+            return render_template("register.html", account_mode=account_mode)
         finally:
             conn.close()
 
-        flash("Account created successfully. You can now log in with Gmail or phone number.", "success")
+        if public_url:
+            flash("Account created. Your organization page is live but marked Pending Verification until the platform reviews your proof.", "success")
+        else:
+            flash("Account created successfully. You can now log in with Gmail or phone number.", "success")
         return redirect(url_for("user_login"))
 
-    return render_template("register.html")
-
+    return render_template("register.html", account_mode=account_mode)
 
 # ---------------------------------------------------------
 # Normal user authentication
