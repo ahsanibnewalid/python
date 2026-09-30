@@ -2838,6 +2838,16 @@ def notification_center():
     conn.close()
     return render_template("notifications.html", current_user=profile, site_name=get_site_name())
 
+@app.route("/notifications/read-all", methods=["POST"])
+def mark_all_notifications_read():
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf()
+    conn=get_db_connection()
+    conn.execute("UPDATE platform_notifications SET is_read=1 WHERE user_id=? AND is_read=0",(session["user_id"],))
+    conn.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND is_read=0",(session["user_id"],))
+    conn.commit(); conn.close()
+    return jsonify({"ok":True})
+
 @app.route("/notifications/<int:notification_id>/read", methods=["POST"])
 def mark_notification_read(notification_id):
     if not user_required(): return jsonify({"error":"login_required"}), 401
