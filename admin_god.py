@@ -127,7 +127,8 @@ def install(app, get_db_connection, init_db):
         users=conn.execute("SELECT username FROM users WHERE username IS NOT NULL AND username!='' ORDER BY username LIMIT 500").fetchall()
         recent=conn.execute("SELECT id,action,scope,target_type,target_id,note,created_at FROM moderation_actions ORDER BY id DESC LIMIT 30").fetchall()
         conn.close()
-        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,owner=os.environ.get("ADMIN_USER","admin"),csrf=session.get("csrf_token",""))
+        import app as app_module
+        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
 
     @app.route("/admin/god/staff/add", methods=["POST"])
     @owner_required
@@ -172,7 +173,8 @@ def install(app, get_db_connection, init_db):
     def admin_god_remove_staff(staff_id):
         conn=get_db_connection(); row=conn.execute("SELECT user_id,username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if not row: conn.close(); abort(404)
-        if row["username"].lower() == os.environ.get("ADMIN_USER","admin").lower():
+        import app as app_module
+        if row["username"].lower() == getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")).lower():
             conn.close(); flash("The System Owner account cannot be removed from the moderator team.","error"); return redirect(url_for("admin_god"))
         username=row["username"]
         conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
