@@ -74,3 +74,12 @@ def test_failed_upload_cleanup_hooks_exist():
     v2 = (ROOT / "v2_core.py").read_text(encoding="utf-8")
     assert 'remove_study_resource_file(file_path)' in v2
     assert 'get_media_storage().delete(key)' in app
+
+
+def test_moderator_owner_protection_and_cleanup_are_present():
+    source = (ROOT / "admin_god.py").read_text(encoding="utf-8")
+    assert "idx_admin_staff_user" in source
+    assert "existing_staff=" in source
+    assert "protected = bool(row[\"username\"])" in source
+    assert "DELETE FROM moderator_work WHERE staff_id=?" in source
+    assert "DELETE FROM moderator_scopes WHERE staff_id=?" in source
