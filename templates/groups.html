@@ -9,5 +9,7 @@ async function refreshGroups(){
     if(oldCards!==newCards){ location.reload(); }
   }catch(e){}
 }
-setInterval(refreshGroups,10000);
+// Group directory is event-driven by explicit create/join/leave actions; avoid
+// repeatedly downloading the full HTML document for every visitor.
+const groupRefreshTimer=null;
 </script>{% include 'mobile_nav.html' %}<button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button></body></html>
