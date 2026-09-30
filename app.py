@@ -1723,16 +1723,19 @@ def serialize_posts(conn, posts, user_id):
         post_ids=[int(p["id"]) for p in posts]
         placeholders=",".join("?" for _ in post_ids)
         comment_rows=conn.execute(
-            f"""SELECT pc.post_id,pc.comment,pc.created_at,u.name,u.photo
-                FROM post_comments pc JOIN users u ON u.id=pc.user_id
-                WHERE pc.post_id IN ({placeholders})
-                ORDER BY pc.post_id,pc.id DESC""",
+            f"""SELECT post_id,comment,created_at,name,photo
+                FROM (
+                    SELECT pc.post_id,pc.comment,pc.created_at,u.name,u.photo,
+                           ROW_NUMBER() OVER (PARTITION BY pc.post_id ORDER BY pc.id DESC) AS rn
+                    FROM post_comments pc JOIN users u ON u.id=pc.user_id
+                    WHERE pc.post_id IN ({placeholders})
+                ) recent_comments
+                WHERE rn<=3
+                ORDER BY post_id,rn""",
             tuple(post_ids)
         ).fetchall()
         for row in comment_rows:
-            bucket=comment_map.setdefault(int(row["post_id"]),[])
-            if len(bucket)<3:
-                bucket.append(dict(row))
+            comment_map.setdefault(int(row["post_id"]),[]).append(dict(row))
     for p in posts:
         output.append({
             "id": p["id"], "user_id": p["user_id"], "name": p["name"], "username": p["username"], "photo": p["photo"],
