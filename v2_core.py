@@ -143,6 +143,21 @@ def install(app, get_db_connection, require_csrf):
             os.remove(local_path)
         return os.path.join("study_resources",stored)
 
+    def remove_study_resource_file(file_path):
+        if not file_path:
+            return
+        provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+        try:
+            if provider in {"s3","r2","b2"}:
+                import app as app_module
+                app_module.get_media_storage().delete(file_path)
+            else:
+                local=os.path.join(app.config.get("UPLOAD_FOLDER","uploads"),file_path)
+                if os.path.isfile(local):
+                    os.remove(local)
+        except Exception:
+            app.logger.exception("Study resource cleanup failed")
+
     # -------------------- schema --------------------
     def init_schema():
         conn = get_db_connection()
@@ -917,16 +932,21 @@ def install(app, get_db_connection, require_csrf):
         now=_now()
         visibility=str(data.get("visibility","enrolled")).strip()
         if visibility not in {"public","enrolled"}: visibility="enrolled"
-        cur=conn.execute(
-            """INSERT INTO study_resources
-               (course_id,author_id,title,description,resource_type,resource_url,file_path,original_filename,visibility,status,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (course_id,uid,title,description,resource_type,resource_url,file_path,original_filename,
-             visibility,"published",now,now)
-        )
-        rid=cur.lastrowid
-        conn.commit(); conn.close()
-        return created({"id":rid,"course_id":course_id,"title":title,"status":"published"})
+        try:
+            cur=conn.execute(
+                """INSERT INTO study_resources
+                   (course_id,author_id,title,description,resource_type,resource_url,file_path,original_filename,visibility,status,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (course_id,uid,title,description,resource_type,resource_url,file_path,original_filename,
+                 visibility,"published",now,now)
+            )
+            rid=cur.lastrowid
+            conn.commit(); conn.close()
+            return created({"id":rid,"course_id":course_id,"title":title,"status":"published"})
+        except Exception:
+            conn.rollback(); conn.close()
+            remove_study_resource_file(file_path)
+            raise
 
     @bp.post("/study-resources/<int:resource_id>/enroll")
     def enroll_study_resource(resource_id):
