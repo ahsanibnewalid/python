@@ -68,6 +68,17 @@ def install(app, get_db_connection, init_db):
             is_read INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )""")
+        # Repair legacy duplicate moderator rows before enforcing the user_id uniqueness rule.
+        # Keep the oldest assignment row; its dependent scopes/work cascade on deletion.
+        conn.execute("""
+            DELETE FROM admin_staff
+            WHERE user_id IS NOT NULL
+              AND id NOT IN (
+                  SELECT MIN(id) FROM admin_staff
+                  WHERE user_id IS NOT NULL
+                  GROUP BY user_id
+              )
+        """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_staff_user ON admin_staff(user_id) WHERE user_id IS NOT NULL")
         conn.commit(); conn.close()
 
