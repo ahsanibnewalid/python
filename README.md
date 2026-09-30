@@ -31,7 +31,7 @@ A Flask-based university community platform with student profiles, social feed, 
 
 ## Important production gaps
 
-This is a commercial MVP foundation, not yet a finished SaaS billing platform. Payment processing, automated custom-domain DNS/SSL, strict per-tenant authorization across every route, object storage, WebSockets and production observability still need implementation before selling to institutions at scale. PostgreSQL persistence is now supported through `DATABASE_URL`; local development can continue using SQLite.
+This is a commercial MVP foundation, not yet a finished SaaS billing platform. Billing remains optional. PostgreSQL persistence, object-storage integration, owner/moderator controls and responsive social UI are supported; production observability and some tenant-specific authorization hardening remain follow-up work before large institutional rollout. PostgreSQL persistence is now supported through `DATABASE_URL`; local development can continue using SQLite.
 
 ## Run locally
 
@@ -62,10 +62,10 @@ Group features:
 
 The public domain opens the user portal first. The admin dashboard is protected and is not linked from the public user login page.
 
-1. Open: `/login`
-2. Username: the value of `ADMIN_USER` (default local username: `admin`)
-3. Password: the admin password configured by `setup_local.py` or `ADMIN_PASSWORD_HASH` in `.env`
-4. After successful login you are redirected to `/admin`.
+1. Open: `/login`.
+2. Sign in with the owner credentials configured for your deployment.
+3. The System Owner console is `/admin/god`.
+4. Change the administrator credentials from `/admin/password`; the persistent PostgreSQL record becomes authoritative.
 
 For a fresh local installation, run `python setup_local.py` once and choose the admin password. Do not use the development fallback password in a real deployment.
 
