@@ -4068,50 +4068,49 @@ def view_profile(user_id):
 
         elif form_identifier == "gallery_upload":
 
-            gallery_files = request.files.getlist(
-                "gallery_photos"
-            )
-
+            gallery_files = request.files.getlist("gallery_photos")
             uploaded_count = 0
-            new_gallery_files=[]
+            new_gallery_files = []
+
             try:
                 for file in gallery_files:
 
-                if not file or not file.filename:
-                    continue
+                    if not file or not file.filename:
+                        continue
 
-                if not allowed_file(file.filename) or not validate_image_signature(file):
-                    continue
+                    if not allowed_file(file.filename) or not validate_image_signature(file):
+                        continue
 
-                filename = generate_unique_filename(
-                    file.filename,
-                    prefix=f"gallery_{user_id}"
-                )
-
-                if not filename:
-                    continue
-
-                save_public_upload(file, filename)
-
-                conn.execute(
-                    """
-                    INSERT INTO gallery
-                    (
-                        user_id,
-                        image_path
+                    filename = generate_unique_filename(
+                        file.filename,
+                        prefix=f"gallery_{user_id}"
                     )
-                    VALUES (?, ?)
-                    """,
-                    (
-                        user_id,
-                        filename
+
+                    if not filename:
+                        continue
+
+                    save_public_upload(file, filename)
+
+                    conn.execute(
+                        """
+                        INSERT INTO gallery
+                        (
+                            user_id,
+                            image_path
+                        )
+                        VALUES (?, ?)
+                        """,
+                        (
+                            user_id,
+                            filename
+                        )
                     )
-                )
 
                     new_gallery_files.append(filename)
                     uploaded_count += 1
 
                 conn.commit()
+
             except Exception as exc:
                 conn.rollback()
                 for name in new_gallery_files:
