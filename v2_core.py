@@ -502,7 +502,7 @@ def install(app, get_db_connection, require_csrf):
             "CREATE INDEX IF NOT EXISTS idx_organization_memberships_user_status ON organization_memberships(user_id,status,organization_id)",
             "CREATE INDEX IF NOT EXISTS idx_organization_memberships_org_role ON organization_memberships(organization_id,role,status)",
             "CREATE INDEX IF NOT EXISTS idx_jobs_org_status_created ON jobs(organization_id,status,created_at,id)",
-            "CREATE INDEX IF NOT EXISTS idx_job_applications_user_status ON job_applications(user_id,status,job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_applications_applicant_status ON job_applications(applicant_id,status,job_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_applications_job_status ON job_applications(job_id,status,id)",
             "CREATE INDEX IF NOT EXISTS idx_application_events_application_created ON application_events(application_id,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_platform_notifications_user_read ON platform_notifications(user_id,is_read,created_at,id)",
