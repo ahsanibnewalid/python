@@ -1,11 +1,10 @@
 """Production media storage abstraction.
 
-The application can continue using local storage for development, while
-production deployments can use any S3-compatible object store (AWS S3,
-Cloudflare R2, Backblaze B2 S3 API, MinIO, etc.).
-
-This module is intentionally provider-neutral. It does not enable billing or
-require cloud credentials unless MEDIA_STORAGE=s3 is explicitly selected.
+The application can use local storage for development. Production can use an
+S3-compatible object store. If S3 is selected but its required bucket is not
+configured, the application falls back to local storage so social uploads do
+not fail with a configuration error. Configure object storage for persistent
+media across Render deploys.
 """
 from __future__ import annotations
 
@@ -108,5 +107,11 @@ class S3MediaStorage:
 def build_media_storage():
     provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
-        return S3MediaStorage()
+        if not os.environ.get("MEDIA_S3_BUCKET", "").strip():
+            return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
+        try:
+            return S3MediaStorage()
+        except Exception as exc:
+            print(f"WARNING: object storage unavailable; using local media storage: {exc}")
+            return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
     return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
