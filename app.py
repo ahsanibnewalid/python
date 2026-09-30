@@ -1642,7 +1642,7 @@ def serialize_posts(conn, posts, user_id):
             if len(bucket)<3:
                 bucket.append(dict(row))
     for p in posts:
-    output.append({
+        output.append({
             "id": p["id"], "user_id": p["user_id"], "name": p["name"], "username": p["username"], "photo": p["photo"],
             "profile_url": url_for("public_profile", user_id=p["user_id"]),
             "caption": p["caption"], "media_type": p["media_type"], "post_type": p["post_type"] if "post_type" in p.keys() else "post",
