@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from functools import wraps
 import json
 
-from flask import Blueprint, jsonify, request, session, abort, render_template, send_from_directory
+from flask import Blueprint, jsonify, request, session, abort, render_template, send_from_directory, redirect
 from werkzeug.utils import secure_filename
 
 bp = Blueprint("v2", __name__, url_prefix="/platform")
@@ -127,6 +127,21 @@ def install(app, get_db_connection, require_csrf):
 
     def created(data):
         return jsonify(data), 201
+
+    def save_study_resource_file(uploaded, stored):
+        """Persist a study resource file using the configured object store."""
+        import app as app_module
+        resource_dir=os.path.join(app.config.get("UPLOAD_FOLDER","uploads"),"study_resources")
+        os.makedirs(resource_dir,exist_ok=True)
+        local_path=os.path.join(resource_dir,stored)
+        uploaded.save(local_path)
+        provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+        if provider in {"s3","r2","b2"}:
+            app_module.get_media_storage().upload_path(
+                local_path, os.path.join("study_resources",stored), getattr(uploaded,"mimetype",None)
+            )
+            os.remove(local_path)
+        return os.path.join("study_resources",stored)
 
     # -------------------- schema --------------------
     def init_schema():
@@ -868,12 +883,8 @@ def install(app, get_db_connection, require_csrf):
             allowed_ext={"pdf","doc","docx","ppt","pptx","txt","md","csv","zip","mp4","webm","mov","jpg","jpeg","png"}
             if ext not in allowed_ext:
                 conn.close(); return json_error("This file type is not allowed.")
-            upload_root=app.config.get("UPLOAD_FOLDER","uploads")
-            resource_dir=os.path.join(upload_root,"study_resources")
-            os.makedirs(resource_dir,exist_ok=True)
             stored=uuid.uuid4().hex+"_"+safe
-            uploaded.save(os.path.join(resource_dir,stored))
-            file_path=os.path.join("study_resources",stored)
+            file_path=save_study_resource_file(uploaded,stored)
             original_filename=safe
         if not resource_url and not file_path:
             conn.close(); return json_error("Provide a resource URL or upload a file.")
@@ -969,6 +980,14 @@ def install(app, get_db_connection, require_csrf):
                 (row["course_id"],uid)).fetchone())
         conn.close()
         if not allowed: abort(403)
+        provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+        if provider in {"s3","r2","b2"}:
+            import app as app_module
+            try:
+                return redirect(app_module.get_media_storage().presigned_get_url(row["file_path"],expires=300))
+            except Exception:
+                app.logger.exception("Study resource object-storage lookup failed")
+                abort(404)
         directory=os.path.join(app.config.get("UPLOAD_FOLDER","uploads"),"study_resources")
         return send_from_directory(directory,os.path.basename(row["file_path"]),as_attachment=False,
                                     download_name=row["original_filename"] or "study-resource")
