@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python production_admin_runtime.py
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: APP_ENV
         value: production
