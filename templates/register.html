@@ -1,3 +1,77 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Create Account</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/css/intlTelInput.css"><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#f3f6fb;font-family:system-ui,-apple-system,Segoe UI,Arial;color:#172033;padding:24px}.wrap{width:min(100%,620px);margin:auto}.card{background:#fff;border-radius:20px;padding:28px;box-shadow:0 15px 45px rgba(0,0,0,.08)}h1{margin:0 0 7px}.sub{color:#667085;margin-bottom:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}label{display:block;font-size:13px;font-weight:750;margin-bottom:6px}input{width:100%;padding:12px;border:1px solid #d7dce5;border-radius:10px;font:inherit}.iti{width:100%}.hint{font-size:11px;color:#7b8490;margin-top:5px}.btn{width:100%;padding:13px;border:0;border-radius:11px;background:#198754;color:#fff;font-weight:800;margin-top:18px}.flash{padding:11px;border-radius:10px;margin-bottom:12px;background:#fee2e2;color:#991b1b}.links{text-align:center;margin-top:18px}.links a{color:#1456c4;text-decoration:none;font-weight:700}.country-note{font-size:11px;color:#667085;margin-top:5px}@media(max-width:620px){body{padding:12px}.grid{grid-template-columns:1fr}.full{grid-column:auto}}</style><link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}"><script src="{{ url_for('static', filename='theme.js') }}"></script></head><body><div class="wrap"><main class="card"><h1>Join {{ site_name }}</h1><div class="sub">Enter your phone number. The country code is detected automatically when possible and can always be changed.</div>{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}<form id="registerForm" method="POST" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="grid"><div><label>Full name *</label><input name="name" required></div><div><label>Username *</label><input name="username" minlength="3" required></div><div><label>Gmail *</label><input type="email" name="gmail" placeholder="you@gmail.com" required></div><div><label>Phone number *</label><input id="phone" name="phone" type="tel" autocomplete="tel" required><div class="country-note">Select Bangladesh 🇧🇩 and you can type either <b>01712345678</b> or <b>+8801712345678</b>.</div></div><div><label>Password *</label><input type="password" name="password" minlength="6" required></div><div><label>Confirm password *</label><input type="password" name="confirm_password" minlength="6" required></div><div class="full"><label>Profile photo</label><input type="file" name="photo" accept="image/*"></div></div><button class="btn" type="submit">Create Account</button></form><div class="links"><a href="{{ url_for('user_login') }}">Already have an account? Log in</a></div></main></div><script src="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/intlTelInput.min.js"></script><script>
-const phone=document.getElementById('phone');const iti=window.intlTelInput(phone,{initialCountry:'bd',nationalMode:true,autoPlaceholder:'aggressive',geoIpLookup:async cb=>{try{const r=await fetch('https://ipapi.co/json/');const d=await r.json();cb((d.country_code||'BD').toLowerCase())}catch(e){cb('bd')}},utilsScript:'https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/utils.js'});document.getElementById('registerForm').addEventListener('submit',e=>{if(iti.isValidNumber()){phone.value=iti.getNumber();return}const raw=phone.value.replace(/[^0-9+]/g,'');if(/^(01[3-9]\d{8})$/.test(raw)){phone.value='+880'+raw.slice(1);return}e.preventDefault();alert('Please enter a valid phone number for the selected country. For Bangladesh use 01XXXXXXXXX or +8801XXXXXXXXX.');});
-</script><button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create Account · {{ site_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#f3f6fb;color:#172033;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial}.wrap{width:min(100%,820px);margin:auto;padding:24px}.card{background:#fff;border-radius:22px;padding:28px;box-shadow:0 15px 45px rgba(0,0,0,.08)}h1{margin:0}.sub{color:#667085;margin:7px 0 22px;line-height:1.55}.mode{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}.mode label{display:block;border:1px solid #d7dce5;border-radius:15px;padding:14px;cursor:pointer}.mode label.active{border-color:#1877f2;background:#eef5ff}.mode input{display:none}.mode strong{display:block;font-size:15px}.mode small{display:block;color:#667085;margin-top:4px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}label.field{display:block;font-size:13px;font-weight:750;margin-bottom:6px}input,select,textarea{width:100%;padding:12px;border:1px solid #d7dce5;border-radius:11px;font:inherit}textarea{min-height:90px;resize:vertical}.section{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f4}.section h2{font-size:17px;margin:0 0 8px}.hint{font-size:11px;color:#6b7280;line-height:1.5}.btn{width:100%;padding:13px;border:0;border-radius:11px;background:#1877f2;color:#fff;font-weight:850;margin-top:18px;cursor:pointer}.flash{padding:11px 12px;border-radius:10px;margin-bottom:12px;background:#fee2e2;color:#991b1b}.links{text-align:center;margin-top:18px}.links a{color:#1456c4;text-decoration:none;font-weight:700}.verify-note{margin-top:12px;padding:12px;border-radius:12px;background:#fff7e6;color:#7a4b00;font-size:12px;line-height:1.5}.hidden{display:none}@media(max-width:640px){.wrap{padding:12px}.grid,.mode{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<main class="card">
+  <h1>Join {{ site_name }}</h1>
+  <div class="sub">Create a personal account, or create the official page for a university, institute, company, IT firm, hospital or other organization. Organization pages are visible to everyone, while membership is verified through administrator approval.</div>
+
+  {% with messages=get_flashed_messages(with_categories=true) %}
+    {% for category,message in messages %}<div class="flash">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="mode" role="radiogroup" aria-label="Account type">
+    <label id="individualMode" class="{{ '' if account_mode=='organization' else 'active' }}">
+      <input type="radio" name="mode_ui" value="individual" {% if account_mode!='organization' %}checked{% endif %}>
+      <strong>👤 Personal account</strong><small>Student, creator, teacher, doctor, employee, official or individual user.</small>
+    </label>
+    <label id="organizationMode" class="{{ 'active' if account_mode=='organization' else '' }}">
+      <input type="radio" name="mode_ui" value="organization" {% if account_mode=='organization' %}checked{% endif %}>
+      <strong>🏢 Organization / Institution</strong><small>Create a public page and become its founder/owner.</small>
+    </label>
+  </div>
+
+  <form id="registerForm" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="account_mode" id="accountMode" value="{{ account_mode or 'individual' }}">
+
+    <div class="grid">
+      <div><label class="field">Full name *</label><input name="name" required></div>
+      <div><label class="field">Username *</label><input name="username" minlength="3" required></div>
+      <div><label class="field">Gmail *</label><input type="email" name="gmail" placeholder="you@gmail.com" required></div>
+      <div><label class="field">Phone number *</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
+      <div><label class="field">Password *</label><input type="password" name="password" minlength="6" required></div>
+      <div><label class="field">Confirm password *</label><input type="password" name="confirm_password" minlength="6" required></div>
+      <div class="full"><label class="field">Profile photo</label><input type="file" name="photo" accept="image/*"></div>
+    </div>
+
+    <section id="organizationFields" class="section {% if account_mode!='organization' %}hidden{% endif %}">
+      <h2>Official page setup</h2>
+      <div class="hint">This creates a public page automatically. Your page will be marked <b>Pending Verification</b> until the platform reviews the evidence you submit.</div>
+      <div class="grid">
+        <div class="full"><label class="field">University / company / institute / organization name *</label><input name="organization_name" id="organizationName"></div>
+        <div><label class="field">Type *</label><select name="organization_type" id="organizationType">
+          <option value="university">University</option><option value="college">College</option><option value="school">School</option><option value="institute">Institute</option><option value="coaching_center">Coaching Center</option><option value="training_center">Training Center</option><option value="company">Company</option><option value="it_firm">IT Firm</option><option value="office">Office</option><option value="hospital">Hospital</option><option value="clinic">Clinic</option><option value="ngo">NGO</option><option value="government">Government Office</option><option value="other">Other</option>
+        </select></div>
+        <div><label class="field">Official domain</label><input name="organization_domain" placeholder="example.edu / example.com"></div>
+        <div><label class="field">Industry</label><input name="organization_industry" placeholder="Education, Software, Healthcare..."></div>
+        <div class="full"><label class="field">Description</label><textarea name="organization_description" placeholder="What does this organization do?"></textarea></div>
+        <div class="full"><label class="field">Founder / organization proof *</label><input type="file" name="organization_proof" accept=".pdf,.jpg,.jpeg,.png,.webp" required></div>
+      </div>
+      <div class="verify-note">🔐 Trust rule: members will later have to prove that they actually study or work here before administrators can approve their requested role. Proof files are kept private and are only available to authorized reviewers.</div>
+    </section>
+
+    <button class="btn" type="submit">Create Account</button>
+  </form>
+  <div class="links"><a href="{{ url_for('user_login') }}">Already have an account? Log in</a></div>
+</main>
+</div>
+
+<script>
+const individual=document.getElementById('individualMode'),organization=document.getElementById('organizationMode'),mode=document.getElementById('accountMode'),orgFields=document.getElementById('organizationFields'),orgName=document.getElementById('organizationName'),proof=document.querySelector('[name="organization_proof"]');
+function setMode(value){mode.value=value;individual.classList.toggle('active',value==='individual');organization.classList.toggle('active',value==='organization');orgFields.classList.toggle('hidden',value!=='organization');orgName.required=value==='organization';proof.required=value==='organization'}
+individual.addEventListener('click',()=>setMode('individual'));organization.addEventListener('click',()=>setMode('organization'));
+setMode(mode.value||'individual');
+</script>
+<button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button>
+</body></html>
