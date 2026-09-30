@@ -1789,14 +1789,14 @@ def private_story_media(token):
     if story["university_id"] and viewer and viewer["university_id"] and int(story["university_id"]) != int(viewer["university_id"]): abort(403)
     ext=story["original_name"].rsplit(".",1)[-1].lower() if "." in story["original_name"] else ""
     if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
-    key=private_media_key(token, post["original_name"])
+    key=private_media_key(token, story["original_name"])
     if not key: abort(404)
     provider=os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
         try:
             return redirect(get_media_storage().presigned_get_url(key, expires=300))
         except Exception:
-            app.logger.exception("Object storage media lookup failed")
+            app.logger.exception("Object storage story lookup failed")
             abort(404)
     path=os.path.join(PRIVATE_MEDIA_FOLDER, key)
     if not os.path.isfile(path): abort(404)
@@ -1988,14 +1988,14 @@ def private_post_media(token):
     if not post["original_name"]: abort(404)
     ext=post["original_name"].rsplit(".",1)[-1].lower() if "." in post["original_name"] else ""
     if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
-    key=private_media_key(token, story["original_name"])
+    key=private_media_key(token, post["original_name"])
     if not key: abort(404)
     provider=os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
         try:
             return redirect(get_media_storage().presigned_get_url(key, expires=300))
         except Exception:
-            app.logger.exception("Object storage story lookup failed")
+            app.logger.exception("Object storage post lookup failed")
             abort(404)
     path=os.path.join(PRIVATE_MEDIA_FOLDER, key)
     if not os.path.isfile(path): abort(404)
