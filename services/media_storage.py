@@ -38,6 +38,15 @@ class LocalMediaStorage:
     def exists(self, key: str) -> bool:
         return self.path_for(key).is_file()
 
+    def delete(self, key: str) -> None:
+        try:
+            self.path_for(key).unlink()
+        except FileNotFoundError:
+            pass
+
+    def presigned_get_url(self, key: str, expires: int = 300) -> str:
+        raise MediaStorageError("Presigned URLs are only available for object storage.")
+
     def open(self, key: str):
         path = self.path_for(key)
         if not path.is_file():
@@ -71,6 +80,23 @@ class S3MediaStorage:
         extra = {"ContentType": content_type} if content_type else {}
         self.client.upload_file(str(local_path), self.bucket, self.key(key), ExtraArgs=extra)
         return key
+
+    def exists(self, key: str) -> bool:
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=self.key(key))
+            return True
+        except Exception:
+            return False
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=self.key(key))
+
+    def presigned_get_url(self, key: str, expires: int = 300) -> str:
+        return self.client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": self.key(key)},
+            ExpiresIn=max(60, min(int(expires), 3600)),
+        )
 
     def download_to(self, key: str, local_path: str | Path) -> Path:
         target = Path(local_path)
