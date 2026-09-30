@@ -14,9 +14,9 @@ def _now():
 
 
 def install(flask_app):
-    # Gunicorn loads this once per worker. The credential values are refreshed
-    # from PostgreSQL before every request so password changes propagate to all
-    # workers without a restart.
+    # Gunicorn may load this module directly or through production_admin_runtime.
+    # Make installation idempotent so either deployment path exposes the same
+    # first-admin/password routes without duplicate Flask endpoints.
     if flask_app.extensions.get("uc_admin_runtime_installed"):
         return
     flask_app.extensions["uc_admin_runtime_installed"] = True
@@ -25,7 +25,25 @@ def install(flask_app):
     get_db_connection = app_module.get_db_connection
     require_csrf = app_module.require_csrf
 
+    def ensure_credentials_table():
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS admin_credentials (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    setup_completed INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def load_credentials():
+        ensure_credentials_table()
         conn = get_db_connection()
         try:
             row = conn.execute(
@@ -43,9 +61,8 @@ def install(flask_app):
         try:
             load_credentials()
         except Exception:
-            # Keep the last known credentials if the DB is temporarily
-            # unavailable. Normal application health/error handling remains in
-            # charge of the request itself.
+            # Preserve normal application startup/error handling if the database
+            # is temporarily unavailable. The setup route will retry explicitly.
             pass
 
     def admin_session_required():
@@ -83,13 +100,24 @@ def install(flask_app):
             else:
                 conn = get_db_connection()
                 try:
-                    conn.execute(
-                        "UPDATE admin_credentials SET username=?, password_hash=?, setup_completed=1, updated_at=? WHERE id=1",
-                        (username, generate_password_hash(password), _now()),
-                    )
+                    password_hash = generate_password_hash(password)
+                    now = _now()
+                    existing = conn.execute(
+                        "SELECT id FROM admin_credentials WHERE id=1"
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            "UPDATE admin_credentials SET username=?, password_hash=?, setup_completed=1, updated_at=? WHERE id=1",
+                            (username, password_hash, now),
+                        )
+                    else:
+                        conn.execute(
+                            "INSERT INTO admin_credentials(id,username,password_hash,setup_completed,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                            (1, username, password_hash, 1, now, now),
+                        )
                     conn.commit()
                     app_module.ADMIN_USER = username
-                    # Do not leave the bootstrap token in a session or response.
+                    app_module.ADMIN_PASSWORD_HASH = password_hash
                     flash("Administrator account created. Remove ADMIN_BOOTSTRAP_TOKEN from Render now, then sign in.", "success")
                     return redirect(url_for("login"))
                 finally:
@@ -122,17 +150,18 @@ def install(flask_app):
             elif password != confirm:
                 flash("The password confirmation does not match.", "error")
             else:
+                new_hash = generate_password_hash(password)
                 conn = get_db_connection()
                 try:
                     conn.execute(
                         "UPDATE admin_credentials SET username=?, password_hash=?, setup_completed=1, updated_at=? WHERE id=1",
-                        (username, generate_password_hash(password), _now()),
+                        (username, new_hash, _now()),
                     )
                     conn.commit()
                 finally:
                     conn.close()
                 app_module.ADMIN_USER = username
-                app_module.ADMIN_PASSWORD_HASH = generate_password_hash(password)
+                app_module.ADMIN_PASSWORD_HASH = new_hash
                 session.pop("logged_in", None)
                 session.pop("admin_username", None)
                 flash("Administrator credentials changed. Please sign in again.", "success")
