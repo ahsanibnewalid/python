@@ -1976,16 +1976,20 @@ def my_profile():
 
 
 def create_media_update_post(conn, user_id, source_path, caption):
-    """Create a historical feed post with its own private copy of an image."""
+    """Create a historical feed post with a durable private media copy."""
     if not source_path or not os.path.isfile(source_path):
         return
     ext=Path(source_path).suffix.lower().lstrip(".") or "jpg"
     if ext not in POST_IMAGE_EXTENSIONS:
         ext="jpg"
     token=secrets.token_urlsafe(36)
-    dest=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
-    import shutil
-    shutil.copy2(source_path, dest)
+    key=f"{token}.{ext}"
+    provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+    if provider in {"s3","r2","b2"}:
+        get_media_storage().upload_path(source_path, key, content_type="image/"+ext if ext in {"jpeg","jpg","png","gif","webp"} else None)
+    else:
+        import shutil
+        shutil.copy2(source_path, os.path.join(PRIVATE_MEDIA_FOLDER, key))
     conn.execute("INSERT INTO posts(user_id,caption,media_token,media_type,original_name,post_type,created_at) VALUES(?,?,?,?,?,?,?)",
                  (user_id, caption, token, "image", "profile-update."+ext, "post", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
 
