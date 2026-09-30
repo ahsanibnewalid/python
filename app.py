@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import sqlite3
 import re
 import uuid
@@ -127,8 +128,13 @@ def save_public_upload(file_storage, filename):
     provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
         try:
+            content_type = (
+                getattr(file_storage, "mimetype", None)
+                or mimetypes.guess_type(key)[0]
+                or "application/octet-stream"
+            )
             get_media_storage().upload_path(
-                local_path, key, content_type=getattr(file_storage, "mimetype", None)
+                local_path, key, content_type=content_type
             )
         except Exception:
             try: os.remove(local_path)
@@ -190,7 +196,12 @@ def save_private_media(file_storage, token, original_name):
     file_storage.save(local_path)
     if provider in {"s3", "r2", "b2"}:
         try:
-            storage.upload_path(local_path, key, content_type=getattr(file_storage, "mimetype", None))
+            content_type = (
+                getattr(file_storage, "mimetype", None)
+                or mimetypes.guess_type(key)[0]
+                or "application/octet-stream"
+            )
+            storage.upload_path(local_path, key, content_type=content_type)
             os.remove(local_path)
         except Exception:
             try:
