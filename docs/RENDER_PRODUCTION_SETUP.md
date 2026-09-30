@@ -13,12 +13,13 @@ Render currently offers a Free Postgres instance for testing, but documents that
 1. In Render, choose **New > Blueprint** and select this repository.
 2. Review `render.yaml`.
 3. Create the services.
-4. Set `ADMIN_PASSWORD_HASH` in the web service environment.
+4. Set `ADMIN_USER=admin` (or your preferred owner username) and `ADMIN_PASSWORD` in the web service environment for the first deployment. The production launcher hashes `ADMIN_PASSWORD` into PostgreSQL; do not store a real password in Git.
 5. Deploy.
 6. Confirm the web service has a `DATABASE_URL` supplied from `university-connect-db`.
 7. Register a test account.
-8. Let the free web service spin down or redeploy it.
-9. Log in again. The account should still exist because it is stored in Postgres, not the web-service filesystem.
+8. Sign in to `/login`; the System Owner console is `/admin/god`.
+9. Let the free web service spin down or redeploy it.
+10. Log in again. The account should still exist because it is stored in Postgres, not the web-service filesystem.
 
 ## Media
 
