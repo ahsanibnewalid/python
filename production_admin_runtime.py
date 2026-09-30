@@ -57,10 +57,14 @@ def prepare_environment():
 def main():
     prepare_environment()
 
-    # Install the new system-owner command center before Gunicorn loads the
-    # application workers. This keeps the legacy admin URLs intact for
-    # compatibility while making /admin the single modern control entrypoint.
+    # Load Flask first, then install both the persistent credential routes and
+    # the System Owner command center before Gunicorn imports app:app. This is
+    # required because the normal app module does not expose first-setup routes
+    # by itself.
     import app
+    from admin_runtime import install as install_admin_runtime
+    install_admin_runtime(app.app)
+
     from admin_god import install as install_admin_god
     install_admin_god(app.app, app.get_db_connection, getattr(app, "init_db", None))
 
