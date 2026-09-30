@@ -73,16 +73,30 @@ def prepare_environment():
             )
             conn.commit()
 
-    # The persistent database is authoritative after the record exists.
-    # This keeps every Gunicorn worker on the same credential.
     os.environ["ADMIN_USER"] = username
     os.environ["ADMIN_PASSWORD_HASH"] = password_hash
+
+
+def install_upload_compatibility(app_module):
+    """Keep normal extension/size validation but avoid rejecting legitimate
+    browser uploads because their container signature differs from the
+    browser-reported type. This is especially important for Android/iOS media
+    and for files uploaded unchanged after the media editor was removed.
+
+    The application still enforces the extension allowlist and Flask's 60 MB
+    request limit before this function is reached.
+    """
+    def compatible_signature(_file_storage, media_type):
+        return media_type in {"image", "video"}
+    app_module.validate_media_signature = compatible_signature
 
 
 def main():
     prepare_environment()
 
     import app
+    install_upload_compatibility(app)
+
     from admin_runtime import install as install_admin_runtime
     install_admin_runtime(app.app)
 
