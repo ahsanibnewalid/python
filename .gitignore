@@ -16,3 +16,6 @@ private_media/posts/*
 .coverage
 
 .flask_secret_key
+
+*.sqlite
+*.sqlite3
