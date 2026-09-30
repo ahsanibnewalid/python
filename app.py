@@ -1524,9 +1524,16 @@ def network_page():
         return redirect(url_for("user_login"))
     if search:
         like = f"%{search}%"
-        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users WHERE id!=? AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?) ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,like,like,like,like)).fetchall()
+        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users
+            WHERE id!=?
+              AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=users.id) OR (b.blocker_id=users.id AND b.blocked_id=?))
+              AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
+            ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,user_id,user_id,like,like,like,like)).fetchall()
     else:
-        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users WHERE id!=? ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,)).fetchall()
+        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users
+            WHERE id!=?
+              AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=users.id) OR (b.blocker_id=users.id AND b.blocked_id=?))
+            ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,user_id,user_id)).fetchall()
     conn.close()
     return render_template("network.html", current_user=current_user, users=users, search=search, csrf=csrf_token(), site_name=get_site_name())
 
@@ -1550,9 +1557,14 @@ def fetch_feed(conn, user_id, offset=0, limit=8):
         FROM posts p
         JOIN users u ON u.id=p.user_id
         WHERE 1=1 {uni_clause}
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=p.user_id)
+                 OR (b.blocker_id=p.user_id AND b.blocked_id=?)
+          )
         ORDER BY p.id DESC
         LIMIT ? OFFSET ?
-        """, (user_id, *uni_params, limit, offset)
+        """, (user_id, *uni_params, user_id, user_id, limit, offset)
     ).fetchall()
 
 
@@ -1567,8 +1579,13 @@ def fetch_reels(conn, user_id, offset=0, limit=12):
                EXISTS(SELECT 1 FROM post_likes me WHERE me.post_id=p.id AND me.user_id=?) AS liked_by_me
         FROM posts p JOIN users u ON u.id=p.user_id
         WHERE p.post_type='reel' {uni_clause}
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=p.user_id)
+                 OR (b.blocker_id=p.user_id AND b.blocked_id=?)
+          )
         ORDER BY p.id DESC LIMIT ? OFFSET ?
-        """, (user_id, *uni_params, limit, offset)
+        """, (user_id, *uni_params, user_id, user_id, limit, offset)
     ).fetchall()
 
 
@@ -1595,9 +1612,14 @@ def fetch_user_posts(conn, profile_user_id, limit=20, offset=0):
         FROM posts p
         JOIN users u ON u.id=p.user_id
         WHERE p.user_id=?
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=p.user_id)
+                 OR (b.blocker_id=p.user_id AND b.blocked_id=?)
+          )
         ORDER BY p.id DESC
         LIMIT ? OFFSET ?
-        """, (session.get("user_id", 0), profile_user_id, limit, offset)
+        """, (session.get("user_id", 0), profile_user_id, session.get("user_id", 0), session.get("user_id", 0), limit, offset)
     ).fetchall()
 
 
@@ -1861,6 +1883,8 @@ def toggle_post_like(post_id):
     post=conn.execute("SELECT p.id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
     viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
     if not post: conn.close(); return jsonify({"error":"Post not found"}),404
+    if users_are_blocked(conn, uid, int(post["id"])): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
+    if conn.execute("SELECT 1 FROM user_blocks b JOIN posts p ON p.user_id=b.blocked_id WHERE p.id=? AND b.blocker_id=?",(post_id,uid)).fetchone(): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
     if post["university_id"] and viewer and viewer["university_id"] and int(post["university_id"]) != int(viewer["university_id"]): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
     exists=conn.execute("SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)).fetchone()
     if exists: conn.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)); liked=False
@@ -1879,6 +1903,8 @@ def add_post_comment(post_id):
     exists=conn.execute("SELECT p.id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
     viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
     if not exists: conn.close(); return jsonify({"error":"Post not found"}),404
+    if conn.execute("SELECT 1 FROM user_blocks b JOIN posts p ON p.user_id=b.blocked_id WHERE p.id=? AND b.blocker_id=?",(post_id,uid)).fetchone() or conn.execute("SELECT 1 FROM user_blocks b JOIN posts p ON p.user_id=b.blocker_id WHERE p.id=? AND b.blocked_id=?",(post_id,uid)).fetchone():
+        conn.close(); return jsonify({"error":"You cannot comment on this post."}),403
     if exists["university_id"] and viewer and viewer["university_id"] and int(exists["university_id"]) != int(viewer["university_id"]): conn.close(); return jsonify({"error":"You cannot comment on this post."}),403
     conn.execute("INSERT INTO post_comments(post_id,user_id,comment,created_at) VALUES(?,?,?,?)",(post_id,uid,comment,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
     count=conn.execute("SELECT COUNT(*) FROM post_comments WHERE post_id=?",(post_id,)).fetchone()[0]
