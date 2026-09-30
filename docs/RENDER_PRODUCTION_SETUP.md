@@ -32,3 +32,14 @@ For a temporary single-instance paid Render deployment, a persistent disk can pr
 ## Billing
 
 Billing remains optional. The default blueprint uses `BILLING_ENABLED=false` and `BILLING_PROVIDER=none`. A website owner can enable a supported provider later without making payment credentials a requirement for normal deployments.
+
+
+## Production hardening notes
+
+Keep MEDIA_STORAGE=s3 in production and configure the S3-compatible bucket credentials. The web-service filesystem is not a durable social-media store.
+
+CI executes the real pytest suite with python -m pytest -q so the project's pytest-style tests are collected and executed.
+
+The application health endpoint /healthz checks the database and required media-storage credentials and is now used by Render health checks.
+
+Rotate any credential that may have appeared in historical Git commits; removing a secret from the latest tree does not invalidate an exposed historical value.
