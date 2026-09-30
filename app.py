@@ -26,6 +26,7 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from v2_core import install as install_v2_core
+from services.media_storage import MediaStorageError, build_media_storage
 
 
 app = Flask(__name__)
@@ -100,6 +101,45 @@ PRIVATE_MEDIA_FOLDER = os.path.abspath(os.path.join("private_media", "posts"))
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PRIVATE_MEDIA_FOLDER, exist_ok=True)
+
+_MEDIA_STORAGE = None
+
+def get_media_storage():
+    """Lazily construct the configured media backend so app boot does not fail
+    merely because optional object-storage credentials are absent."""
+    global _MEDIA_STORAGE
+    if _MEDIA_STORAGE is None:
+        _MEDIA_STORAGE = build_media_storage()
+    return _MEDIA_STORAGE
+
+def private_media_key(token, original_name):
+    if not token or not original_name:
+        return None
+    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+    if not re.fullmatch(r"[a-z0-9]{1,8}", ext):
+        return None
+    return f"{token}.{ext}"
+
+def save_private_media(file_storage, token, original_name):
+    """Persist post/story/reel media using the configured local or S3 backend."""
+    key = private_media_key(token, original_name)
+    if not key:
+        raise MediaStorageError("Invalid private media key.")
+    local_path = os.path.join(PRIVATE_MEDIA_FOLDER, key)
+    provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+    storage = get_media_storage()
+    file_storage.save(local_path)
+    if provider in {"s3", "r2", "b2"}:
+        try:
+            storage.upload_path(local_path, key, content_type=getattr(file_storage, "mimetype", None))
+            os.remove(local_path)
+        except Exception:
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+            raise
+    return local_path
 
 
 # ---------------------------------------------------------
@@ -969,13 +1009,15 @@ def validate_media_signature(file_storage, media_type):
 
 
 def remove_private_media(token, original_name):
-    if not token or not original_name:
-        return
-    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
-    if not re.fullmatch(r"[a-z0-9]{1,8}", ext):
+    key = private_media_key(token, original_name)
+    if not key:
         return
     try:
-        os.remove(os.path.join(PRIVATE_MEDIA_FOLDER, f"{token}.{ext}"))
+        get_media_storage().delete(key)
+    except Exception:
+        pass
+    try:
+        os.remove(os.path.join(PRIVATE_MEDIA_FOLDER, key))
     except OSError:
         pass
 
@@ -1051,12 +1093,13 @@ def admin_required():
 
 
 def notify_user(conn, user_id, title, body):
-    """Create an in-app notification safely inside the caller's transaction."""
+    """Create a persistent notification in the canonical platform feed."""
     if not user_id:
         return
+    created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO notifications(user_id,title,body,is_read,created_at) VALUES(?,?,?,?,?)",
-        (user_id, title, body, 0, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+        "INSERT INTO platform_notifications(user_id,kind,title,body,url,is_read,created_at) VALUES(?,?,?,?,?,?,?)",
+        (int(user_id), "social", title, body, "", 0, created_at)
     )
 
 
@@ -1121,7 +1164,7 @@ def login():
             session.permanent = True
             session.modified = True
 
-            return redirect(url_for("home"))
+            return redirect("/admin/god")
 
         error = "Invalid admin credentials. Access denied."
 
@@ -1560,13 +1603,24 @@ def fetch_user_posts(conn, profile_user_id, limit=20, offset=0):
 
 def serialize_posts(conn, posts, user_id):
     output=[]
-    for p in posts:
-        comments=conn.execute(
-            """SELECT pc.comment, pc.created_at, u.name, u.photo
-               FROM post_comments pc JOIN users u ON u.id=pc.user_id
-               WHERE pc.post_id=? ORDER BY pc.id DESC LIMIT 3""", (p["id"],)
+    posts=list(posts)
+    comment_map={}
+    if posts:
+        post_ids=[int(p["id"]) for p in posts]
+        placeholders=",".join("?" for _ in post_ids)
+        comment_rows=conn.execute(
+            f"""SELECT pc.post_id,pc.comment,pc.created_at,u.name,u.photo
+                FROM post_comments pc JOIN users u ON u.id=pc.user_id
+                WHERE pc.post_id IN ({placeholders})
+                ORDER BY pc.post_id,pc.id DESC""",
+            tuple(post_ids)
         ).fetchall()
-        output.append({
+        for row in comment_rows:
+            bucket=comment_map.setdefault(int(row["post_id"]),[])
+            if len(bucket)<3:
+                bucket.append(dict(row))
+    for p in posts:
+    output.append({
             "id": p["id"], "user_id": p["user_id"], "name": p["name"], "username": p["username"], "photo": p["photo"],
             "profile_url": url_for("public_profile", user_id=p["user_id"]),
             "caption": p["caption"], "media_type": p["media_type"], "post_type": p["post_type"] if "post_type" in p.keys() else "post",
@@ -1574,7 +1628,7 @@ def serialize_posts(conn, posts, user_id):
             "created_at": p["created_at"], "like_count": p["like_count"],
             "comment_count": p["comment_count"], "liked_by_me": bool(p["liked_by_me"]),
             "is_owner": int(p["user_id"]) == int(user_id),
-            "comments":[dict(c) for c in comments]
+            "comments":comment_map.get(int(p["id"]),[])
         })
     return output
 
@@ -1621,7 +1675,7 @@ def create_story():
     token=secrets.token_urlsafe(36)
     path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
     try:
-        media.save(path)
+        save_private_media(media, token, original)
         now=datetime.utcnow().replace(microsecond=0)
         from datetime import timedelta
         expires=now+timedelta(hours=24)
@@ -1631,8 +1685,7 @@ def create_story():
         story_id=cursor.lastrowid
         conn.commit(); conn.close()
     except Exception as exc:
-        try: os.remove(path)
-        except OSError: pass
+        remove_private_media(token, original)
         app.logger.exception("Story upload failed")
         message="The story could not be uploaded. Please try the upload again."
         if wants_json: return jsonify({"error": message}), 500
@@ -1681,7 +1734,16 @@ def private_story_media(token):
     if story["university_id"] and viewer and viewer["university_id"] and int(story["university_id"]) != int(viewer["university_id"]): abort(403)
     ext=story["original_name"].rsplit(".",1)[-1].lower() if "." in story["original_name"] else ""
     if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
-    path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
+    key=private_media_key(token, post["original_name"])
+    if not key: abort(404)
+    provider=os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+    if provider in {"s3", "r2", "b2"}:
+        try:
+            return redirect(get_media_storage().presigned_get_url(key, expires=300))
+        except Exception:
+            app.logger.exception("Object storage media lookup failed")
+            abort(404)
+    path=os.path.join(PRIVATE_MEDIA_FOLDER, key)
     if not os.path.isfile(path): abort(404)
     return send_file(path, conditional=True, max_age=0)
 
@@ -1757,8 +1819,7 @@ def create_post():
                 raise ValueError("A Reel must be a video.")
             if not validate_media_signature(media, media_type):
                 raise ValueError("The uploaded file does not match its declared media type.")
-            saved_path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
-            media.save(saved_path)
+            saved_path=save_private_media(media, token, original)
         elif mode == "reel":
             raise ValueError("Choose a video for your Reel.")
         post_type = "reel" if mode == "reel" else "post"
@@ -1871,7 +1932,16 @@ def private_post_media(token):
     if not post["original_name"]: abort(404)
     ext=post["original_name"].rsplit(".",1)[-1].lower() if "." in post["original_name"] else ""
     if not re.fullmatch(r"[a-z0-9]{1,8}", ext): abort(404)
-    path=os.path.join(PRIVATE_MEDIA_FOLDER, token+"."+ext)
+    key=private_media_key(token, story["original_name"])
+    if not key: abort(404)
+    provider=os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+    if provider in {"s3", "r2", "b2"}:
+        try:
+            return redirect(get_media_storage().presigned_get_url(key, expires=300))
+        except Exception:
+            app.logger.exception("Object storage story lookup failed")
+            abort(404)
+    path=os.path.join(PRIVATE_MEDIA_FOLDER, key)
     if not os.path.isfile(path): abort(404)
     return send_file(path, conditional=True, max_age=0)
 
@@ -2618,6 +2688,8 @@ def mark_notification_read(notification_id):
     if not user_required(): return jsonify({"error":"login_required"}), 401
     require_csrf()
     conn=get_db_connection()
+    conn.execute("UPDATE platform_notifications SET is_read=1 WHERE id=? AND user_id=?", (notification_id, session["user_id"]))
+    # Keep legacy rows in sync where an old notification id happens to match.
     conn.execute("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?", (notification_id, session["user_id"]))
     conn.commit(); conn.close()
     return jsonify({"ok":True})
@@ -2627,8 +2699,25 @@ def mark_notification_read(notification_id):
 def api_notifications():
     if not user_required(): return jsonify({"error":"login_required"}), 401
     conn=get_db_connection(); uid=session["user_id"]
-    rows=conn.execute("SELECT id,title,body,is_read,created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30", (uid,)).fetchall()
-    unread=conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0", (uid,)).fetchone()[0]
+    # Materialize legacy notifications into the canonical notification feed once.
+    conn.execute(
+        """INSERT INTO platform_notifications(user_id,kind,title,body,url,is_read,created_at)
+           SELECT n.user_id,'legacy',n.title,n.body,'',n.is_read,n.created_at
+           FROM notifications n
+           WHERE n.user_id=?
+             AND NOT EXISTS (
+                 SELECT 1 FROM platform_notifications p
+                 WHERE p.user_id=n.user_id AND p.title=n.title
+                   AND p.body=n.body AND p.created_at=n.created_at
+             )""",
+        (uid,)
+    )
+    conn.commit()
+    rows=conn.execute(
+        "SELECT id,kind,title,body,url,is_read,created_at FROM platform_notifications WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 50",
+        (uid,)
+    ).fetchall()
+    unread=conn.execute("SELECT COUNT(*) FROM platform_notifications WHERE user_id=? AND is_read=0", (uid,)).fetchone()[0]
     conn.close()
     return jsonify({"notifications":[dict(r) for r in rows],"unread_count":unread})
 
