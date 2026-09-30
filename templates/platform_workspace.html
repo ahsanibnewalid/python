@@ -112,7 +112,8 @@ async function initWorkspaceCapabilities(){
     const d=await r.json(), orgs=d.organizations||[];
     if(orgs.length){
       $('officeTab')?.style.removeProperty('display');
-      $('manageTab')?.style.removeProperty('display');
+      const manageRoles=new Set(['organization_owner','office_manager','hr_manager','recruiter']);
+      if(orgs.some(o=>manageRoles.has(o.role))) $('manageTab')?.style.removeProperty('display');
     }
   }catch(e){}
 }
