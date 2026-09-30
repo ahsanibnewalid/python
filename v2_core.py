@@ -7,6 +7,9 @@ social networks or messaging platforms.
 from datetime import datetime, timezone
 from functools import wraps
 import json
+import os
+import re
+import secrets
 
 from flask import Blueprint, jsonify, request, session, abort, render_template, send_from_directory, redirect
 from werkzeug.utils import secure_filename
@@ -32,6 +35,14 @@ ROLE_PERMISSIONS = {
     "accounts": set(),
     "team_leader": {"notice.publish"},
     "employee": set(),
+    "manager": {"organization.manage", "notice.publish", "job.create"},
+    "intern": set(),
+    "contractor": set(),
+    "doctor": {"notice.publish"},
+    "nurse": {"notice.publish"},
+    "medical_staff": {"notice.publish"},
+    "administrator": {"organization.manage", "role.manage", "notice.publish"},
+    "coordinator": {"notice.publish"},
 }
 
 def _now():
@@ -103,13 +114,15 @@ def install(app, get_db_connection, require_csrf):
         "teacher": {"student"},
     }
     ORGANIZATION_DELEGABLE = {
-        "organization_owner": {"office_manager","hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
-        "office_manager": {"hr_manager","recruiter","media_manager","accounts","team_leader","employee"},
-        "hr_manager": {"recruiter","employee"},
+        "organization_owner": {"office_manager","hr_manager","recruiter","media_manager","accounts","team_leader","employee","manager","intern","contractor","doctor","nurse","medical_staff","administrator","coordinator"},
+        "office_manager": {"hr_manager","recruiter","media_manager","accounts","team_leader","employee","manager","intern","contractor","coordinator"},
+        "hr_manager": {"recruiter","employee","intern","contractor"},
         "recruiter": set(),
         "media_manager": set(),
         "accounts": set(),
-        "team_leader": {"employee"},
+        "team_leader": {"employee","intern","contractor"},
+        "administrator": {"employee","staff","intern","contractor"},
+        "manager": {"employee","intern","contractor"},
     }
 
     def can_assign_role(uid, memberships_table, entity_column, entity_id, role):
@@ -157,6 +170,89 @@ def install(app, get_db_connection, require_csrf):
                     os.remove(local)
         except Exception:
             app.logger.exception("Study resource cleanup failed")
+
+    SPACE_ROLE_OPTIONS = {
+        "university": ["student","teacher","staff","alumni","department_coordinator","registrar","principal"],
+        "college": ["student","teacher","staff","alumni","department_coordinator"],
+        "school": ["student","teacher","staff","administrator","coordinator"],
+        "institute": ["student","teacher","staff","administrator","coordinator"],
+        "coaching_center": ["student","teacher","staff","administrator","coordinator"],
+        "training_center": ["student","teacher","staff","administrator","coordinator"],
+        "company": ["employee","manager","hr_manager","recruiter","intern","contractor","office_manager"],
+        "it_firm": ["employee","manager","hr_manager","recruiter","intern","contractor","office_manager","team_leader"],
+        "office": ["employee","manager","hr_manager","intern","contractor","office_manager"],
+        "hospital": ["doctor","nurse","medical_staff","administrator","employee","hr_manager"],
+        "clinic": ["doctor","nurse","medical_staff","administrator","employee"],
+        "ngo": ["employee","manager","hr_manager","intern","contractor","administrator"],
+        "government": ["employee","manager","staff","administrator","coordinator"],
+        "other": ["employee","manager","staff","administrator","intern","contractor"],
+    }
+
+    def slugify(value):
+        base = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+        return base or "space"
+
+    def ensure_space(conn, kind, entity_id, name, created_by=None, verification_status=None):
+        if kind not in {"institution", "organization"} or not entity_id:
+            return None
+        row = conn.execute(
+            "SELECT * FROM platform_spaces WHERE kind=? AND " + ("institution_id=?" if kind == "institution" else "organization_id=?") + " LIMIT 1",
+            (kind, entity_id),
+        ).fetchone()
+        if row:
+            return row["id"]
+        slug_base = slugify(name)
+        slug = slug_base
+        n = 2
+        while conn.execute("SELECT 1 FROM platform_spaces WHERE slug=? LIMIT 1", (slug,)).fetchone():
+            slug = f"{slug_base}-{entity_id}" if n == 2 else f"{slug_base}-{entity_id}-{n}"
+            n += 1
+        now = _now()
+        if kind == "institution":
+            conn.execute(
+                "INSERT INTO platform_spaces(kind,institution_id,slug,display_name,verification_status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (kind, entity_id, slug, name, verification_status or "unverified", created_by, now, now),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO platform_spaces(kind,organization_id,slug,display_name,verification_status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (kind, entity_id, slug, name, verification_status or "unverified", created_by, now, now),
+            )
+        return conn.execute("SELECT id FROM platform_spaces WHERE slug=?", (slug,)).fetchone()["id"]
+
+    def space_row(conn, slug_or_id):
+        if str(slug_or_id).isdigit():
+            return conn.execute("SELECT * FROM platform_spaces WHERE id=?", (int(slug_or_id),)).fetchone()
+        return conn.execute("SELECT * FROM platform_spaces WHERE slug=?", (str(slug_or_id),)).fetchone()
+
+    def get_space_entity(conn, space):
+        if not space:
+            return None
+        if space["kind"] == "institution":
+            return conn.execute("SELECT * FROM institutions WHERE id=?", (space["institution_id"],)).fetchone()
+        return conn.execute("SELECT * FROM organizations WHERE id=?", (space["organization_id"],)).fetchone()
+
+    def can_manage_space(uid, space):
+        if not uid or not space:
+            return False
+        if space["kind"] == "institution":
+            return can_institution(uid, int(space["institution_id"]), "role.manage") or can_institution(uid, int(space["institution_id"]), "notice.publish")
+        return can_organization(uid, int(space["organization_id"]), "role.manage") or can_organization(uid, int(space["organization_id"]), "organization.manage")
+
+    def role_options_for_space(space, entity):
+        key = (entity["institution_type"] if space["kind"] == "institution" else entity["organization_type"] or "other").strip().lower()
+        return SPACE_ROLE_OPTIONS.get(key, SPACE_ROLE_OPTIONS["other"])
+
+    def membership_state(conn, space, uid):
+        if space["kind"] == "institution":
+            return conn.execute(
+                "SELECT role,title,status,verification_status FROM institution_memberships WHERE institution_id=? AND user_id=? ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END LIMIT 1",
+                (space["institution_id"], uid),
+            ).fetchone()
+        return conn.execute(
+            "SELECT role,title,status,verification_status FROM organization_memberships WHERE organization_id=? AND user_id=? ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END LIMIT 1",
+            (space["organization_id"], uid),
+        ).fetchone()
 
     # -------------------- schema --------------------
     def init_schema():
@@ -341,6 +437,69 @@ def install(app, get_db_connection, require_csrf):
                 FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
                 FOREIGN KEY(assigned_to) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY(assigned_by) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS platform_spaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                institution_id INTEGER,
+                organization_id INTEGER,
+                slug TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                verification_status TEXT NOT NULL DEFAULT 'unverified',
+                created_by INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(institution_id) REFERENCES institutions(id) ON DELETE CASCADE,
+                FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS space_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                space_id INTEGER NOT NULL,
+                author_id INTEGER NOT NULL,
+                update_type TEXT NOT NULL DEFAULT 'announcement',
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                attachment_url TEXT DEFAULT '',
+                pinned INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'published',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(space_id) REFERENCES platform_spaces(id) ON DELETE CASCADE,
+                FOREIGN KEY(author_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS space_membership_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                space_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                requested_role TEXT NOT NULL,
+                requested_title TEXT DEFAULT '',
+                department_id INTEGER DEFAULT NULL,
+                proof_kind TEXT NOT NULL,
+                proof_token TEXT NOT NULL,
+                proof_original_name TEXT NOT NULL,
+                proof_note TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                submitted_at TEXT NOT NULL,
+                reviewed_at TEXT DEFAULT NULL,
+                reviewed_by INTEGER DEFAULT NULL,
+                review_note TEXT DEFAULT '',
+                FOREIGN KEY(space_id) REFERENCES platform_spaces(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS space_verification_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                space_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                proof_kind TEXT DEFAULT '',
+                proof_token TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                actor_id INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(space_id) REFERENCES platform_spaces(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE SET NULL
             )""",
             """CREATE TABLE IF NOT EXISTS cv_profiles (
                 user_id INTEGER PRIMARY KEY,
@@ -527,6 +686,57 @@ def install(app, get_db_connection, require_csrf):
             "CREATE INDEX IF NOT EXISTS idx_recorded_classes_course_created ON recorded_classes(course_id,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_cv_documents_user_updated ON cv_documents(user_id,updated_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_cv_profiles_user ON cv_profiles(user_id)",
+        ):
+            conn.execute(index_sql)
+
+        # Add trust metadata to legacy membership/entity tables without breaking existing deployments.
+        for table, columns in {
+            "institutions": {
+                "verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+                "verified_at": "TEXT",
+                "verified_by": "INTEGER",
+            },
+            "organizations": {
+                "verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+                "verified_at": "TEXT",
+                "verified_by": "INTEGER",
+            },
+            "institution_memberships": {
+                "verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+                "verified_at": "TEXT",
+                "verified_by": "INTEGER",
+                "proof_kind": "TEXT DEFAULT ''",
+                "proof_token": "TEXT DEFAULT ''",
+                "proof_original_name": "TEXT DEFAULT ''",
+                "verification_note": "TEXT DEFAULT ''",
+            },
+            "organization_memberships": {
+                "verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+                "verified_at": "TEXT",
+                "verified_by": "INTEGER",
+                "proof_kind": "TEXT DEFAULT ''",
+                "proof_token": "TEXT DEFAULT ''",
+                "proof_original_name": "TEXT DEFAULT ''",
+                "verification_note": "TEXT DEFAULT ''",
+            },
+        }.items():
+            existing = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table).fetchall()}
+            for column, definition in columns.items():
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+        for row in conn.execute("SELECT id,name,institution_type,created_at FROM institutions").fetchall():
+            ensure_space(conn, "institution", row["id"], row["name"], None, "unverified")
+        for row in conn.execute("SELECT id,name,organization_type,created_at FROM organizations").fetchall():
+            ensure_space(conn, "organization", row["id"], row["name"], None, "unverified")
+
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_platform_spaces_slug ON platform_spaces(slug)",
+            "CREATE INDEX IF NOT EXISTS idx_space_updates_space_created ON space_updates(space_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_space_requests_space_status ON space_membership_requests(space_id,status,submitted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_space_requests_user_status ON space_membership_requests(user_id,status,submitted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_space_events_space_created ON space_verification_events(space_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_space_updates_author ON space_updates(author_id,created_at)",
         ):
             conn.execute(index_sql)
 
