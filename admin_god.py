@@ -169,13 +169,15 @@ def install(app, get_db_connection, init_db):
     @app.route("/admin/god/staff/<int:staff_id>/remove", methods=["POST"])
     @owner_required
     def admin_god_remove_staff(staff_id):
-        conn=get_db_connection(); row=conn.execute("SELECT username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
+        conn=get_db_connection(); row=conn.execute("SELECT user_id,username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if not row: conn.close(); abort(404)
         if row["username"].lower() == os.environ.get("ADMIN_USER","admin").lower():
             conn.close(); flash("The System Owner account cannot be removed from the moderator team.","error"); return redirect(url_for("admin_god"))
         username=row["username"]
-        conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(None,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
-        conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,)); conn.commit(); conn.close(); flash(f"{username} was removed from the moderator team.","success"); return redirect(url_for("admin_god"))
+        conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
+        notify_staff(conn, row["user_id"], "Moderator access removed", "The System Owner removed your moderator assignment.")
+        conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,))
+        conn.commit(); conn.close(); flash(f"{username} was removed from the moderator team.","success"); return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/work/add", methods=["POST"])
     @owner_required
