@@ -17,7 +17,7 @@ a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);back
 <main class="wrap">
 <section class="hero"><div class="eyebrow">Your student & career space</div><h1>Learn. Connect. Get hired.</h1><p>One focused workspace for university life and professional growth—courses, recorded classes, notices, jobs, applications, CVs and conversations without leaving your platform.</p><div class="hero-actions"><a href="#jobs" onclick="show('jobs')">💼 Explore jobs</a><a class="ghost" href="#cv" onclick="show('cv')">📄 Build my CV</a><a class="ghost" href="#messages" onclick="show('messages')">💬 Messages</a></div></section><div class="stats"><div class="stat"><strong>💼</strong><span>Jobs & opportunities</span></div><div class="stat"><strong>📄</strong><span>Career-ready CV</span></div><div class="stat"><strong>🎓</strong><span>Academic workspace</span></div><div class="stat"><strong>💬</strong><span>People & recruiters</span></div></div>
 <div id="flash"></div>
-<div class="tabs"><button class="active" onclick="show('jobs',this)">💼 Jobs</button><button onclick="show('cv',this)">📄 My CV</button><button onclick="show('applications',this)">📬 Applications</button><button onclick="show('messages',this)">💬 Messages</button><button onclick="show('notifications',this)">🔔 Notifications</button><button onclick="show('universities',this)">🎓 Universities</button><button onclick="show('resources',this)">📚 Study Resources</button><button onclick="show('companies',this)">🏢 Companies</button><button onclick="show('office',this)">👔 My Office</button><button onclick="show('admin',this)">⚙ Manage</button></div>
+<div class="tabs"><button class="active" onclick="show('jobs',this)">💼 Jobs</button><button onclick="show('cv',this)">📄 My CV</button><button onclick="show('applications',this)">📬 Applications</button><button onclick="show('messages',this)">💬 Messages</button><button onclick="show('notifications',this)">🔔 Notifications</button><button onclick="show('universities',this)">🎓 Universities</button><button onclick="show('resources',this)">📚 Study Resources</button><button onclick="show('companies',this)">🏢 Companies</button><button id="officeTab" style="display:none" onclick="show('office',this)">👔 My Office</button><button id="manageTab" style="display:none" onclick="show('admin',this)">⚙ Manage</button></div>
 
 <section id="jobs" class="panel">
 <div class="grid">
@@ -105,6 +105,17 @@ const csrf="{{ csrf_token() }}"; let selectedJob=null, selectedConversation=null
 const $=id=>document.getElementById(id);
 async function api(url,opt={}){opt.headers=Object.assign({'X-CSRF-Token':csrf,'Content-Type':'application/json'},opt.headers||{});const r=await fetch(url,opt);const d=await r.json().catch(()=>({error:'Invalid response'}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
 function msg(t,err=false){$('flash').innerHTML='<div class="'+(err?'error':'success')+'">'+t+'</div>';setTimeout(()=>{$('flash').innerHTML=''},3500)}
+async function initWorkspaceCapabilities(){
+  try{
+    const r=await fetch('/platform/organizations/mine',{cache:'no-store'});
+    if(!r.ok)return;
+    const d=await r.json(), orgs=d.organizations||[];
+    if(orgs.length){
+      $('officeTab')?.style.removeProperty('display');
+      $('manageTab')?.style.removeProperty('display');
+    }
+  }catch(e){}
+}
 function show(id,btn){document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));if(btn)btn.classList.add('active');if(id==='jobs')loadJobs();if(id==='cv')loadCV();if(id==='applications')loadApplications();if(id==='messages')loadConversations();if(id==='notifications')loadNotifications();if(id==='companies')loadCompanies();if(id==='office')loadOffice();if(id==='universities')loadUniversities();if(id==='resources')loadResources();if(id==='admin')loadEmployerConsole()}
 async function loadResources(){
   try{
@@ -183,5 +194,6 @@ async function createInstitution(e){e.preventDefault();try{const d=await api('/p
 async function createOrganization(e){e.preventDefault();try{const d=await api('/platform/organizations',{method:'POST',body:JSON.stringify({name:$('org_name').value,industry:$('org_industry').value,domain:$('org_domain').value,description:$('org_desc').value})});msg('Company created. You are now the owner.');location.href='/platform/organizations/'+d.id+'/office'}catch(e){msg(e.message,true)}}
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 loadJobs();
+initWorkspaceCapabilities();
 </script>
 </body></html>
