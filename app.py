@@ -126,9 +126,16 @@ def save_public_upload(file_storage, filename):
     file_storage.save(local_path)
     provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
-        get_media_storage().upload_path(
-            local_path, key, content_type=getattr(file_storage, "mimetype", None)
-        )
+        try:
+            get_media_storage().upload_path(
+                local_path, key, content_type=getattr(file_storage, "mimetype", None)
+            )
+        except Exception:
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+            raise
     return local_path
 
 _original_static_view = app.view_functions.get("static")
@@ -1373,6 +1380,24 @@ def register():
 # Normal user authentication
 # ---------------------------------------------------------
 
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    """Lightweight deployment health endpoint for Render and uptime checks."""
+    try:
+        conn = get_db_connection()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+        if provider in {"s3", "r2", "b2"}:
+            required = ("MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY")
+            if not all(os.environ.get(key, "").strip() for key in required):
+                return jsonify({"status": "degraded", "database": "ok", "media_storage": "misconfigured"}), 503
+        return jsonify({"status": "ok", "database": "ok", "media_storage": provider}), 200
+    except Exception:
+        app.logger.exception("Health check failed")
+        return jsonify({"status": "error"}), 503
+
+
 @app.before_request
 def enforce_https():
     # TLS itself is provided by the production reverse proxy/web server.
@@ -1390,7 +1415,7 @@ def security_headers(response):
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
-    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://cdn.jsdelivr.net; media-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://ipapi.co")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; media-src 'self' https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://ipapi.co")
     if request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
