@@ -1830,9 +1830,9 @@ def private_story_media(token):
     conn=get_db_connection()
     story=conn.execute("SELECT s.*, u.university_id FROM stories s JOIN users u ON u.id=s.user_id WHERE s.media_token=?", (token,)).fetchone()
     viewer=conn.execute("SELECT university_id FROM users WHERE id=?", (session["user_id"],)).fetchone()
+    if not story: conn.close(); abort(404)
+    if users_are_blocked(conn, session["user_id"], int(story["user_id"])): conn.close(); abort(403)
     conn.close()
-    if not story: abort(404)
-    if users_are_blocked(conn, session["user_id"], int(story["user_id"])): abort(403)
     if story["expires_at"] <= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"): abort(404)
     if story["university_id"] and viewer and viewer["university_id"] and int(story["university_id"]) != int(viewer["university_id"]): abort(403)
     ext=story["original_name"].rsplit(".",1)[-1].lower() if "." in story["original_name"] else ""
@@ -2030,9 +2030,9 @@ def private_post_media(token):
     conn=get_db_connection()
     post=conn.execute("SELECT p.*, u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.media_token=?",(token,)).fetchone()
     viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(session["user_id"],)).fetchone()
+    if not post: conn.close(); abort(404)
+    if users_are_blocked(conn, session["user_id"], int(post["user_id"])): conn.close(); abort(403)
     conn.close()
-    if not post: abort(404)
-    if users_are_blocked(conn, session["user_id"], int(post["user_id"])): abort(403)
     if post["university_id"] and viewer and viewer["university_id"] and int(post["university_id"]) != int(viewer["university_id"]): abort(403)
     if not post["original_name"]: abort(404)
     ext=post["original_name"].rsplit(".",1)[-1].lower() if "." in post["original_name"] else ""
