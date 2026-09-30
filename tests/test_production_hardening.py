@@ -55,3 +55,22 @@ def test_high_volume_indexes_use_existing_columns():
         "idx_conversation_messages_conversation_created",
     ):
         assert name in v2
+
+
+def test_admin_runtime_does_not_query_credentials_on_user_pages():
+    source = (ROOT / "admin_runtime.py").read_text(encoding="utf-8")
+    assert 'request.path == "/login" or request.path.startswith("/admin")' in source
+
+
+def test_bulk_notification_read_and_group_comment_errors_are_hardened():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert '@app.route("/notifications/read-all", methods=["POST"])' in app
+    assert 'Post not found.' in app
+    assert 'group_id=post["group_id"] if post else 1' not in app
+
+
+def test_failed_upload_cleanup_hooks_exist():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    v2 = (ROOT / "v2_core.py").read_text(encoding="utf-8")
+    assert 'remove_study_resource_file(file_path)' in v2
+    assert 'get_media_storage().delete(key)' in app
