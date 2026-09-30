@@ -128,7 +128,28 @@ def install(app, get_db_connection, init_db):
         recent=conn.execute("SELECT id,action,scope,target_type,target_id,note,created_at FROM moderation_actions ORDER BY id DESC LIMIT 30").fetchall()
         conn.close()
         import app as app_module
-        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
+        provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+        storage_ready = provider in {"s3","r2","b2"} and all(
+            os.environ.get(k,"").strip()
+            for k in ("MEDIA_S3_BUCKET","MEDIA_S3_ACCESS_KEY","MEDIA_S3_SECRET_KEY")
+        )
+        if provider == "local" and os.environ.get("APP_ENV","development") == "production":
+            storage_status="warning"
+            storage_label="Local media storage is ephemeral"
+        elif provider in {"s3","r2","b2"} and storage_ready:
+            storage_status="ready"
+            storage_label=f"{provider.upper()} object storage configured"
+        else:
+            storage_status="warning"
+            storage_label="Object storage credentials are incomplete"
+        health={
+            "database":"ready",
+            "media_status":storage_status,
+            "media_label":storage_label,
+            "secret_status":"ready" if os.environ.get("FLASK_SECRET_KEY","").strip() else "warning",
+            "environment":os.environ.get("APP_ENV","development"),
+        }
+        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
 
     @app.route("/admin/god/staff/add", methods=["POST"])
     @owner_required
