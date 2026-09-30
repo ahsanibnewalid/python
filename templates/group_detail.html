@@ -14,5 +14,9 @@ async function refreshGroupState(){
     lastMemberCount=d.member_count; lastRequestCount=d.pending_requests;
   }catch(e){}
 }
-setInterval(refreshGroupState,5000);
+let groupPollTimer=null;
+function startGroupPolling(){if(groupPollTimer===null)groupPollTimer=setInterval(refreshGroupState,15000)}
+function stopGroupPolling(){if(groupPollTimer!==null){clearInterval(groupPollTimer);groupPollTimer=null}}
+startGroupPolling();
+document.addEventListener('visibilitychange',()=>document.hidden?stopGroupPolling():startGroupPolling());
 </script>{% include 'mobile_nav.html' %}<button class="uc-theme-toggle" type="button" onclick="ucSetTheme((localStorage.getItem('uc_theme')||'system')==='dark'?'light':'dark')" title="Toggle dark/light theme">🌓</button></body></html>
