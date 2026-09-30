@@ -120,14 +120,16 @@ def install(app, get_db_connection, init_db):
             try: counts[key] = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"]
             except Exception: counts[key] = 0
         staff = conn.execute("SELECT * FROM admin_staff ORDER BY id DESC").fetchall(); staff_data=[]
+        import app as app_module
+        owner_username = getattr(app_module, "ADMIN_USER", os.environ.get("ADMIN_USER", "admin")).strip()
         for s in staff:
             scopes=conn.execute("SELECT scope FROM moderator_scopes WHERE staff_id=? ORDER BY scope",(s["id"],)).fetchall()
             work=conn.execute("SELECT COUNT(*) AS c FROM moderator_work WHERE staff_id=? AND status='open'",(s["id"],)).fetchone()["c"]
-            staff_data.append({"id":s["id"],"username":s["username"],"role":s["role"],"status":s["status"],"created_by":s["created_by"],"created_at":s["created_at"],"scopes":[x["scope"] for x in scopes],"open_work":work})
+            is_owner = bool(s["username"]) and s["username"].casefold() == owner_username.casefold()
+            staff_data.append({"id":s["id"],"username":s["username"],"role":s["role"],"status":s["status"],"created_by":s["created_by"],"created_at":s["created_at"],"scopes":[x["scope"] for x in scopes],"open_work":work,"is_owner":is_owner})
         users=conn.execute("SELECT username FROM users WHERE username IS NOT NULL AND username!='' ORDER BY username LIMIT 500").fetchall()
         recent=conn.execute("SELECT id,action,scope,target_type,target_id,note,created_at FROM moderation_actions ORDER BY id DESC LIMIT 30").fetchall()
         conn.close()
-        import app as app_module
         provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
         storage_ready = provider in {"s3","r2","b2"} and all(
             os.environ.get(k,"").strip()
@@ -158,6 +160,9 @@ def install(app, get_db_connection, init_db):
         if not username or not selected: flash("Choose a user and at least one moderation responsibility.","error"); return redirect(url_for("admin_god"))
         conn=get_db_connection(); user=conn.execute("SELECT id,username FROM users WHERE lower(username)=lower(?)",(username,)).fetchone()
         if not user: conn.close(); flash("That user account does not exist.","error"); return redirect(url_for("admin_god"))
+        existing_staff=conn.execute("SELECT id,status FROM admin_staff WHERE user_id=? OR lower(username)=lower(?) LIMIT 1",(user["id"],user["username"])).fetchone()
+        if existing_staff:
+            conn.close(); flash("That account is already present in the moderator team. Edit its responsibilities instead.","error"); return redirect(url_for("admin_god"))
         try:
             now=datetime.utcnow().isoformat(); cur=conn.execute("INSERT INTO admin_staff(user_id,username,role,status,created_by,created_at) VALUES(?,?,?,?,?,?)",(user["id"],user["username"],"moderator","active",session.get("admin_username"),now)); staff_id=cur.lastrowid
             for scope in selected: conn.execute("INSERT INTO moderator_scopes(staff_id,scope) VALUES(?,?)",(staff_id,scope))
@@ -195,13 +200,30 @@ def install(app, get_db_connection, init_db):
         conn=get_db_connection(); row=conn.execute("SELECT user_id,username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if not row: conn.close(); abort(404)
         import app as app_module
-        if row["username"].lower() == getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")).lower():
-            conn.close(); flash("The System Owner account cannot be removed from the moderator team.","error"); return redirect(url_for("admin_god"))
+        owner_username=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")).strip()
+        owner_user=conn.execute("SELECT id FROM users WHERE lower(username)=lower(?) LIMIT 1",(owner_username,)).fetchone()
+        protected = bool(row["username"]) and row["username"].casefold() == owner_username.casefold()
+        if owner_user and row["user_id"] and int(owner_user["id"]) == int(row["user_id"]):
+            protected = True
+        if protected:
+            conn.close(); flash("The System Owner identity is protected and cannot be removed from the moderator team.","error"); return redirect(url_for("admin_god"))
         username=row["username"]
-        conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
-        notify_staff(conn, row["user_id"], "Moderator access removed", "The System Owner removed your moderator assignment.")
-        conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,))
-        conn.commit(); conn.close(); flash(f"{username} was removed from the moderator team.","success"); return redirect(url_for("admin_god"))
+        try:
+            conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
+            notify_staff(conn, row["user_id"], "Moderator access removed", "The System Owner removed your moderator assignment.")
+            conn.execute("DELETE FROM moderator_work WHERE staff_id=?",(staff_id,))
+            conn.execute("DELETE FROM moderator_scopes WHERE staff_id=?",(staff_id,))
+            conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            conn.close()
+            app.logger.exception("Moderator removal failed")
+            flash("Moderator removal failed. No changes were applied.","error")
+            return redirect(url_for("admin_god"))
+        conn.close()
+        flash(f"{username} was removed from the moderator team.","success")
+        return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/work/add", methods=["POST"])
     @owner_required
