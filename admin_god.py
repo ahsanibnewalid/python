@@ -87,16 +87,8 @@ def install(app, get_db_connection, init_db):
         row = conn.execute("SELECT * FROM admin_staff WHERE user_id=? AND status='active'", (int(session["user_id"]),)).fetchone()
         conn.close(); return row
 
-    def staff_scope(staff_id, scope):
-        conn = get_db_connection()
-        row = conn.execute("SELECT 1 FROM moderator_scopes WHERE staff_id=? AND scope=?", (staff_id, scope)).fetchone()
-        conn.close(); return bool(row)
-
     @app.before_request
     def route_legacy_admin_to_god():
-        # The old admin suite remains in source for backward compatibility, but
-        # the owner now has one command center. Legacy panels cannot become a
-        # second administrative surface accidentally.
         if request.path == "/admin" and request.method == "GET":
             return redirect(url_for("admin_god"))
         if request.path.startswith("/admin/") and not request.path.startswith(("/admin/god", "/admin/first-setup", "/admin/password")):
@@ -137,16 +129,30 @@ def install(app, get_db_connection, init_db):
     @app.route("/admin/god/staff/<int:staff_id>/scopes", methods=["POST"])
     @owner_required
     def admin_god_scopes(staff_id):
-        selected=[s for s in request.form.getlist("scope") if s in SCOPES]; conn=get_db_connection(); conn.execute("DELETE FROM moderator_scopes WHERE staff_id=?",(staff_id,))
+        selected=[s for s in request.form.getlist("scope") if s in SCOPES]; conn=get_db_connection(); row=conn.execute("SELECT user_id FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
+        if not row: conn.close(); abort(404)
+        conn.execute("DELETE FROM moderator_scopes WHERE staff_id=?",(staff_id,))
         for scope in selected: conn.execute("INSERT INTO moderator_scopes(staff_id,scope) VALUES(?,?)",(staff_id,scope))
+        conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"updated_scopes","staff","moderator",str(staff_id),"Responsibilities updated by System Owner",datetime.utcnow().isoformat()))
         conn.commit(); conn.close(); flash("Moderator responsibilities updated.","success"); return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/staff/<int:staff_id>/toggle", methods=["POST"])
     @owner_required
     def admin_god_toggle_staff(staff_id):
         conn=get_db_connection(); row=conn.execute("SELECT status FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
-        if row: conn.execute("UPDATE admin_staff SET status=? WHERE id=?",("suspended" if row["status"]=="active" else "active",staff_id)); conn.commit()
+        if row:
+            new_status="suspended" if row["status"]=="active" else "active"
+            conn.execute("UPDATE admin_staff SET status=? WHERE id=?",(new_status,staff_id)); conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"status_changed","staff","moderator",str(staff_id),new_status,datetime.utcnow().isoformat())); conn.commit()
         conn.close(); return redirect(url_for("admin_god"))
+
+    @app.route("/admin/god/staff/<int:staff_id>/remove", methods=["POST"])
+    @owner_required
+    def admin_god_remove_staff(staff_id):
+        conn=get_db_connection(); row=conn.execute("SELECT username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
+        if not row: conn.close(); abort(404)
+        username=row["username"]
+        conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
+        conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,)); conn.commit(); conn.close(); flash(f"{username} was removed from the moderator team.","success"); return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/work/add", methods=["POST"])
     @owner_required
