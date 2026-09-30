@@ -178,7 +178,7 @@ def test_admin_login_recovers_from_stale_csrf_session():
         follow_redirects=False,
     )
     assert login.status_code == 302
-    assert login.headers["Location"].endswith("/")
+    assert login.headers["Location"].endswith("/admin/god")
 
 
 def test_message_notifications_are_incremental_after_cursor():
