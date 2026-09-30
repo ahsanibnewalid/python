@@ -2463,59 +2463,58 @@ def messages():
 
     conversations = conn.execute(
         """
-        SELECT
-            u.id,
-            u.name,
-            u.username,
-            u.photo,
-            (
-                SELECT m.message
-                FROM messages m
-                WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                   OR (m.sender_id = u.id AND m.receiver_id = ?)
-                ORDER BY m.id DESC LIMIT 1
-            ) AS last_message,
-            (
-                SELECT m.created_at
-                FROM messages m
-                WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                   OR (m.sender_id = u.id AND m.receiver_id = ?)
-                ORDER BY m.id DESC LIMIT 1
-            ) AS last_message_at,
-            (
-                SELECT COUNT(*)
-                FROM messages m
-                WHERE m.sender_id = u.id
-                  AND m.receiver_id = ?
-                  AND m.is_read = 0
-            ) AS unread_count
-        FROM users u
-        WHERE u.id != ?
-          AND EXISTS (
-              SELECT 1 FROM messages m
-              WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                 OR (m.sender_id = u.id AND m.receiver_id = ?)
-          )
-        ORDER BY COALESCE(last_message_at, '') DESC, u.name COLLATE NOCASE
-        """,
-        (
-            current_user_id, current_user_id,
-            current_user_id, current_user_id,
-            current_user_id,
-            current_user_id,
-            current_user_id, current_user_id
+        WITH recent AS (
+            SELECT
+                CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id,
+                id,message,created_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END
+                    ORDER BY id DESC
+                ) AS rn
+            FROM messages
+            WHERE sender_id=? OR receiver_id=?
+        ),
+        unread AS (
+            SELECT sender_id AS other_id, COUNT(*) AS unread_count
+            FROM messages
+            WHERE receiver_id=? AND is_read=0
+            GROUP BY sender_id
         )
+        SELECT u.id,u.name,u.username,u.photo,
+               r.message AS last_message,r.created_at AS last_message_at,
+               COALESCE(unread.unread_count,0) AS unread_count
+        FROM recent r
+        JOIN users u ON u.id=r.other_id
+        LEFT JOIN unread ON unread.other_id=u.id
+        WHERE r.rn=1
+          AND u.id!=?
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=u.id)
+                 OR (b.blocker_id=u.id AND b.blocked_id=?)
+          )
+        ORDER BY r.id DESC
+        LIMIT 50
+        """,
+        (current_user_id,current_user_id,current_user_id,current_user_id,current_user_id,current_user_id,current_user_id,current_user_id)
     ).fetchall()
 
     users = conn.execute(
         """
-        SELECT id, name, username, photo
+        SELECT id,name,username,photo
         FROM users
         WHERE id != ?
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=users.id)
+                 OR (b.blocker_id=users.id AND b.blocked_id=?)
+          )
         ORDER BY name COLLATE NOCASE
+        LIMIT 50
         """,
-        (current_user_id,)
+        (current_user_id,current_user_id,current_user_id)
     ).fetchall()
+
     chat_groups = conn.execute("""SELECT cg.*, (SELECT COUNT(*) FROM chat_group_members cm WHERE cm.chat_group_id=cg.id) AS member_count
         FROM chat_groups cg JOIN chat_group_members mine ON mine.chat_group_id=cg.id AND mine.user_id=? ORDER BY cg.id DESC LIMIT 12""",(current_user_id,)).fetchall()
     social_groups = conn.execute("SELECT g.id,g.name FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name",(current_user_id,)).fetchall()
