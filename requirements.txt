@@ -5,3 +5,4 @@ psycopg[binary]>=3.2,<4
 gunicorn>=23,<24; platform_system != "Windows"
 pytest>=8,<9
 requests>=2.32,<3
+boto3>=1.35,<2
