@@ -8,7 +8,8 @@ Then open the **web service -> Environment** settings and add:
 
 - `DATABASE_URL` = the PostgreSQL database's **Internal Database URL**
 - Keep `FLASK_SECRET_KEY` fixed between deployments.
-- Keep `ADMIN_PASSWORD_HASH` configured for production.
+- Keep the Render PostgreSQL `DATABASE_URL` supplied by the database service; never use a placeholder value.
+- For a new deployment, use `ADMIN_USER` + `ADMIN_PASSWORD` only for the first bootstrap. After the first admin account is created, remove `ADMIN_PASSWORD`; PostgreSQL is the credential source of truth.
 - Set `APP_ENV=production`.
 - Set `COOKIE_SECURE=1` when the site is served over HTTPS.
 - Set `TRUST_PROXY=1` when the Render reverse proxy is trusted for the deployment.
