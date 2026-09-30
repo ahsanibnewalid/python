@@ -931,9 +931,12 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_gallery_user_created ON gallery(user_id,id)",
         "CREATE INDEX IF NOT EXISTS idx_groups_university_created ON groups(university_id,id)",
         "CREATE INDEX IF NOT EXISTS idx_group_members_user_group ON group_members(user_id,group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_group_members_group_user ON group_members(group_id,user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_group_admins_group_user ON group_admins(group_id,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_group_posts_group_created ON group_posts(group_id,id)",
         "CREATE INDEX IF NOT EXISTS idx_group_post_comments_post_created ON group_post_comments(post_id,id)",
         "CREATE INDEX IF NOT EXISTS idx_chat_group_members_user_group ON chat_group_members(user_id,chat_group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_group_members_group_user ON chat_group_members(chat_group_id,user_id)",
     ):
         conn.execute(index_sql)
 
