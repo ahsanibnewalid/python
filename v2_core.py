@@ -488,6 +488,32 @@ def install(app, get_db_connection, require_csrf):
                 if not exists:
                     conn.execute("INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",(cid,m["sender_id"],m["message"],"",m["created_at"]))
 
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_institution_memberships_user_status ON institution_memberships(user_id,status,institution_id)",
+            "CREATE INDEX IF NOT EXISTS idx_institution_memberships_institution_role ON institution_memberships(institution_id,role,status)",
+            "CREATE INDEX IF NOT EXISTS idx_departments_university_name ON departments(university_id,name)",
+            "CREATE INDEX IF NOT EXISTS idx_courses_department_status ON courses(department_id,status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_course_enrollments_user_status ON course_enrollments(user_id,status,course_id)",
+            "CREATE INDEX IF NOT EXISTS idx_course_enrollments_course_status ON course_enrollments(course_id,status,user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_notices_institution_created ON notices(institution_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_study_resources_course_status ON study_resources(course_id,status,created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_resource_enrollments_user_status ON resource_enrollments(user_id,status,resource_id)",
+            "CREATE INDEX IF NOT EXISTS idx_resource_stars_resource ON resource_stars(resource_id,user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_organization_memberships_user_status ON organization_memberships(user_id,status,organization_id)",
+            "CREATE INDEX IF NOT EXISTS idx_organization_memberships_org_role ON organization_memberships(organization_id,role,status)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_org_status_created ON jobs(organization_id,status,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_applications_user_status ON job_applications(user_id,status,job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_applications_job_status ON job_applications(job_id,status,id)",
+            "CREATE INDEX IF NOT EXISTS idx_application_events_application_created ON application_events(application_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_platform_notifications_user_read ON platform_notifications(user_id,is_read,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON conversation_members(user_id,conversation_id)",
+            "CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_created ON conversation_messages(conversation_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_recorded_classes_course_created ON recorded_classes(course_id,created_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_cv_documents_user_updated ON cv_documents(user_id,updated_at,id)",
+            "CREATE INDEX IF NOT EXISTS idx_cv_profiles_user ON cv_profiles(user_id)",
+        ):
+            conn.execute(index_sql)
+
         conn.commit()
         conn.close()
 
