@@ -3,6 +3,7 @@ import sqlite3
 import re
 import uuid
 import secrets
+_COMMUNITY_COUNT_CACHE = {}
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
@@ -1497,10 +1498,21 @@ def user_home():
         (user_id,)
     ).fetchone()[0]
 
-    total_members = conn.execute(
-        f"SELECT COUNT(*) FROM users WHERE id != ? {uni_clause}",
-        (user_id, *uni_params)
-    ).fetchone()[0]
+    # Community totals are expensive on large installations. Cache each
+    # university's count for a short window so the home page does not perform a
+    # full users-table COUNT on every request.
+    import time
+    cache_key=("community", current_user["university_id"] or 0)
+    cached=_COMMUNITY_COUNT_CACHE.get(cache_key)
+    now_ts=time.time()
+    if cached and cached[0] > now_ts:
+        total_members=cached[1]
+    else:
+        total_members = conn.execute(
+            f"SELECT COUNT(*) FROM users WHERE id != ? {uni_clause}",
+            (user_id, *uni_params)
+        ).fetchone()[0]
+        _COMMUNITY_COUNT_CACHE[cache_key]=(now_ts+60,total_members)
 
     conversation_count = conn.execute(
         """
@@ -1516,35 +1528,40 @@ def user_home():
 
     recent_conversations = conn.execute(
         """
-        SELECT
-            u.id, u.name, u.username, u.photo,
-            (
-                SELECT m.message FROM messages m
-                WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                   OR (m.sender_id = u.id AND m.receiver_id = ?)
-                ORDER BY m.id DESC LIMIT 1
-            ) AS last_message,
-            (
-                SELECT m.created_at FROM messages m
-                WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                   OR (m.sender_id = u.id AND m.receiver_id = ?)
-                ORDER BY m.id DESC LIMIT 1
-            ) AS last_message_at,
-            (
-                SELECT COUNT(*) FROM messages m
-                WHERE m.sender_id = u.id AND m.receiver_id = ? AND m.is_read = 0
-            ) AS unread_count
-        FROM users u
-        WHERE u.id != ?
-          AND EXISTS (
-              SELECT 1 FROM messages m
-              WHERE (m.sender_id = ? AND m.receiver_id = u.id)
-                 OR (m.sender_id = u.id AND m.receiver_id = ?)
+        WITH recent AS (
+            SELECT
+                CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id,
+                id, message, created_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END
+                    ORDER BY id DESC
+                ) AS rn
+            FROM messages
+            WHERE sender_id=? OR receiver_id=?
+        ),
+        unread AS (
+            SELECT sender_id AS other_id, COUNT(*) AS unread_count
+            FROM messages
+            WHERE receiver_id=? AND is_read=0
+            GROUP BY sender_id
+        )
+        SELECT u.id,u.name,u.username,u.photo,
+               r.message AS last_message,r.created_at AS last_message_at,
+               COALESCE(unread.unread_count,0) AS unread_count
+        FROM recent r
+        JOIN users u ON u.id=r.other_id
+        LEFT JOIN unread ON unread.other_id=u.id
+        WHERE r.rn=1
+          AND u.id != ?
+          AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+              WHERE (b.blocker_id=? AND b.blocked_id=u.id)
+                 OR (b.blocker_id=u.id AND b.blocked_id=?)
           )
-        ORDER BY last_message_at DESC
+        ORDER BY r.id DESC
         LIMIT 5
         """,
-        (user_id, user_id, user_id, user_id, user_id, user_id, user_id, user_id)
+        (user_id,user_id,user_id,user_id,user_id,user_id,user_id,user_id)
     ).fetchall()
 
     joined_groups = conn.execute("""SELECT g.id,g.name,(SELECT COUNT(*) FROM group_members gm2 WHERE gm2.group_id=g.id) member_count
