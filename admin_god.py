@@ -88,7 +88,8 @@ def install(app, get_db_connection, init_db):
             if not session.get("logged_in") or not session.get("admin_username"):
                 return redirect(url_for("login"))
             ensure_schema()
-            owner = os.environ.get("ADMIN_USER", "admin")
+            import app as app_module
+            owner = getattr(app_module, "ADMIN_USER", os.environ.get("ADMIN_USER", "admin"))
             if session.get("admin_username") != owner:
                 return abort(403)
             if request.method == "POST" and not csrf_ok():
