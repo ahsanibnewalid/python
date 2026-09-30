@@ -1,9 +1,10 @@
 import app
 import admin_god
+import pytest
 from werkzeug.security import generate_password_hash
 
 
-admin_god.install(app.app, app.get_db_connection, getattr(app, "init_db", None))
+_INSTALLED = False
 
 
 def _admin_session(client):
@@ -23,7 +24,15 @@ def _cleanup():
     conn.close()
 
 
-def setup_function(_):
+@pytest.fixture(autouse=True)
+def admin_routes():
+    global _INSTALLED
+    if not _INSTALLED:
+        admin_god.install(app.app, app.get_db_connection, getattr(app, "init_db", None))
+        _INSTALLED = True
+    client = app.app.test_client()
+    _admin_session(client)
+    client.get("/admin/god")
     _cleanup()
 
 
