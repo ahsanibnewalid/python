@@ -522,6 +522,7 @@ def install(app, get_db_connection, require_csrf):
             "CREATE INDEX IF NOT EXISTS idx_application_events_application_created ON application_events(application_id,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_platform_notifications_user_read ON platform_notifications(user_id,is_read,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON conversation_members(user_id,conversation_id)",
+            "CREATE INDEX IF NOT EXISTS idx_conversation_members_conversation_user ON conversation_members(conversation_id,user_id)",
             "CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_created ON conversation_messages(conversation_id,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_recorded_classes_course_created ON recorded_classes(course_id,created_at,id)",
             "CREATE INDEX IF NOT EXISTS idx_cv_documents_user_updated ON cv_documents(user_id,updated_at,id)",
