@@ -31,3 +31,12 @@ For a temporary single-instance paid Render deployment, a persistent disk can pr
 ## Billing
 
 Billing remains optional. The default blueprint uses `BILLING_ENABLED=false` and `BILLING_PROVIDER=none`. A website owner can enable a supported provider later without making payment credentials a requirement for normal deployments.
+
+
+## Production hardening notes
+
+Keep MEDIA_STORAGE=s3 in production and configure MEDIA_S3_BUCKET, MEDIA_S3_ACCESS_KEY and MEDIA_S3_SECRET_KEY (plus MEDIA_S3_ENDPOINT when using an S3-compatible endpoint such as R2 or B2). The service filesystem is not a durable media store.
+
+CI now executes the project pytest suite with `python -m pytest -q` so the plain pytest-style tests are actually collected and run.
+
+Rotate any credentials that may have appeared in historical repository commits. Removing a secret from the current tree does not invalidate an exposed historical value.
