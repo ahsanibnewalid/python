@@ -906,6 +906,29 @@ def init_db():
         (os.environ.get("SITE_NAME", "University Connect"),)
     )
 
+    # Production indexes for feed, messaging, social-graph and notification
+    # access patterns. CREATE INDEX IF NOT EXISTS is supported by both SQLite
+    # and PostgreSQL and keeps repeated app initialization safe.
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_posts_type_created ON posts(post_type,id)",
+        "CREATE INDEX IF NOT EXISTS idx_post_likes_user_post ON post_likes(user_id,post_id)",
+        "CREATE INDEX IF NOT EXISTS idx_post_comments_post_created ON post_comments(post_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_stories_user_expiry ON stories(user_id,expires_at,id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_receiver_read ON messages(receiver_id,is_read,id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_sender_receiver ON messages(sender_id,receiver_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker_blocked ON user_blocks(blocker_id,blocked_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked_blocker ON user_blocks(blocked_id,blocker_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id,is_read,id)",
+        "CREATE INDEX IF NOT EXISTS idx_gallery_user_created ON gallery(user_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_groups_university_created ON groups(university_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_group_members_user_group ON group_members(user_id,group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_group_posts_group_created ON group_posts(group_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_group_post_comments_post_created ON group_post_comments(post_id,id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_group_members_user_group ON chat_group_members(user_id,chat_group_id)",
+    ):
+        conn.execute(index_sql)
+
     conn.commit()
     conn.close()
 
