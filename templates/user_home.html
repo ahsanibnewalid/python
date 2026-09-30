@@ -188,7 +188,7 @@ async function loadNotifications(renderList=true){const list=document.getElement
 function escapeHtml(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML}
 document.addEventListener('play',e=>{if(e.target?.tagName==='VIDEO'){document.querySelectorAll('video').forEach(v=>{if(v!==e.target)v.pause()})}},true);
 async function readNotification(id,el){try{await fetch('/notifications/'+id+'/read',{method:'POST',headers:{'X-CSRF-Token':CSRF}});el.classList.remove('unread');loadNotifications()}catch(e){}}
-async function markAllNotifications(){const items=[...document.querySelectorAll('.notification-item.unread')];for(const el of items){const id=el.dataset.id;await fetch('/notifications/'+id+'/read',{method:'POST',headers:{'X-CSRF-Token':CSRF}}).catch(()=>{});el.classList.remove('unread')}loadNotifications()}
+async function markAllNotifications(){try{await fetch('/notifications/read-all',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest'}})}catch(e){}loadNotifications(true)}
 
 let storyCollection={{ stories|tojson }};let storyIndex=0;let currentStory=null;let storyTimer=null;
 function openStory(story){currentStory=story;storyIndex=Math.max(0,storyCollection.findIndex(s=>Number(s.id)===Number(story.id)));renderStory()}
