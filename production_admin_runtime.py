@@ -1,4 +1,10 @@
-"""Render production bootstrap for persistent administrator credentials and admin control center."""
+"""Render production bootstrap for persistent administrator credentials and admin control center.
+
+The first administrator may be bootstrapped from environment/.env values. Those
+values are used only when the persistent admin record has not been completed.
+After the password is changed in the admin panel, the database becomes the
+source of truth and the bootstrap password is no longer used.
+"""
 from __future__ import annotations
 
 import os
@@ -25,11 +31,28 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def bootstrap_password_hash():
+    """Return the one-time bootstrap hash from env/.env, if supplied.
+
+    ADMIN_PASSWORD_HASH remains supported for deployments that already use a
+    pre-hashed credential. ADMIN_PASSWORD is intentionally never persisted as
+    plaintext; it is converted to a secure hash immediately at startup.
+    """
+    existing_hash = os.environ.get("ADMIN_PASSWORD_HASH", "").strip()
+    if existing_hash:
+        return existing_hash
+
+    bootstrap_password = os.environ.get("ADMIN_PASSWORD", "")
+    if bootstrap_password:
+        return generate_password_hash(bootstrap_password)
+
+    return generate_password_hash(secrets.token_urlsafe(48))
+
+
 def prepare_environment():
     url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
-        if not os.environ.get("ADMIN_PASSWORD_HASH"):
-            os.environ["ADMIN_PASSWORD_HASH"] = generate_password_hash(secrets.token_urlsafe(32))
+        os.environ["ADMIN_PASSWORD_HASH"] = bootstrap_password_hash()
         return
 
     with psycopg.connect(url) as conn:
@@ -37,19 +60,21 @@ def prepare_environment():
         row = conn.execute(
             "SELECT username,password_hash,setup_completed FROM admin_credentials WHERE id=1"
         ).fetchone()
+
         if row:
-            username, password_hash, _ = row
+            username, password_hash, setup_completed = row
         else:
             username = os.environ.get("ADMIN_USER", "admin").strip() or "admin"
-            password_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
-            if not password_hash:
-                password_hash = generate_password_hash(secrets.token_urlsafe(48))
+            password_hash = bootstrap_password_hash()
+            setup_completed = 0
             conn.execute(
-                "INSERT INTO admin_credentials(id,username,password_hash,setup_completed,created_at,updated_at) VALUES(1,%s,%s,0,%s,%s)",
-                (username, password_hash, now(), now()),
+                "INSERT INTO admin_credentials(id,username,password_hash,setup_completed,created_at,updated_at) VALUES(1,%s,%s,%s,%s,%s)",
+                (username, password_hash, setup_completed, now(), now()),
             )
             conn.commit()
 
+    # The persistent database is authoritative after the record exists.
+    # This keeps every Gunicorn worker on the same credential.
     os.environ["ADMIN_USER"] = username
     os.environ["ADMIN_PASSWORD_HASH"] = password_hash
 
@@ -57,10 +82,6 @@ def prepare_environment():
 def main():
     prepare_environment()
 
-    # Load Flask first, then install both the persistent credential routes and
-    # the System Owner command center before Gunicorn imports app:app. This is
-    # required because the normal app module does not expose first-setup routes
-    # by itself.
     import app
     from admin_runtime import install as install_admin_runtime
     install_admin_runtime(app.app)
