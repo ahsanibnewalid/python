@@ -141,6 +141,18 @@ def install(app, get_db_connection, init_db):
             staff_data.append({"id":s["id"],"username":s["username"],"role":s["role"],"status":s["status"],"created_by":s["created_by"],"created_at":s["created_at"],"scopes":[x["scope"] for x in scopes],"open_work":work,"is_owner":is_owner})
         users=conn.execute("SELECT username FROM users WHERE username IS NOT NULL AND username!='' ORDER BY username LIMIT 500").fetchall()
         recent=conn.execute("SELECT id,action,scope,target_type,target_id,note,created_at FROM moderation_actions ORDER BY id DESC LIMIT 30").fetchall()
+        try:
+            trust_spaces=conn.execute("""
+                SELECT s.id,s.slug,s.display_name,s.kind,s.verification_status,
+                       COALESCE(i.name,o.name) owner_space_name
+                FROM platform_spaces s
+                LEFT JOIN institutions i ON i.id=s.institution_id
+                LEFT JOIN organizations o ON o.id=s.organization_id
+                WHERE s.verification_status!='verified'
+                ORDER BY s.created_at DESC LIMIT 100
+            """).fetchall()
+        except Exception:
+            trust_spaces=[]
         conn.close()
         provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
         storage_ready = provider in {"s3","r2","b2"} and all(
@@ -163,7 +175,39 @@ def install(app, get_db_connection, init_db):
             "secret_status":"ready" if os.environ.get("FLASK_SECRET_KEY","").strip() else "warning",
             "environment":os.environ.get("APP_ENV","development"),
         }
-        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
+        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
+
+    @app.route("/admin/god/space/<int:space_id>/verify", methods=["POST"])
+    @owner_required
+    def admin_god_verify_space(space_id):
+        conn=get_db_connection()
+        try:
+            space=conn.execute("SELECT * FROM platform_spaces WHERE id=?",(space_id,)).fetchone()
+            if not space:
+                conn.close(); abort(404)
+            owner_user_id=None
+            try:
+                owner_row=conn.execute("SELECT id FROM users WHERE lower(username)=lower(?) LIMIT 1",(session.get("admin_username") or "",)).fetchone()
+                owner_user_id=owner_row["id"] if owner_row else None
+            except Exception:
+                owner_user_id=None
+            now=datetime.utcnow().isoformat()
+            conn.execute("UPDATE platform_spaces SET verification_status='verified',updated_at=? WHERE id=?",(now,space_id))
+            if space["kind"]=="institution":
+                conn.execute("UPDATE institutions SET verification_status='verified',verified_at=?,verified_by=? WHERE id=?",(now,owner_user_id,space["institution_id"]))
+                conn.execute("UPDATE institution_memberships SET verification_status='verified',verified_at=?,verified_by=? WHERE institution_id=? AND role='institution_owner'",(now,owner_user_id,space["institution_id"]))
+            else:
+                conn.execute("UPDATE organizations SET verification_status='verified',verified_at=?,verified_by=? WHERE id=?",(now,owner_user_id,space["organization_id"]))
+                conn.execute("UPDATE organization_memberships SET verification_status='verified',verified_at=?,verified_by=? WHERE organization_id=? AND role='organization_owner'",(now,owner_user_id,space["organization_id"]))
+            conn.commit()
+            flash(f"{space['display_name']} is now marked as verified.","success")
+        except Exception:
+            conn.rollback()
+            app.logger.exception("Organization verification failed")
+            flash("Verification failed. No changes were applied.","error")
+        finally:
+            conn.close()
+        return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/staff/add", methods=["POST"])
     @owner_required
