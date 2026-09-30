@@ -3053,12 +3053,21 @@ def group_request_action(group_id,user_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf(); action=request.form.get("action","approve"); conn=get_db_connection(); uid=session["user_id"]; group=conn.execute("SELECT * FROM groups WHERE id=?",(group_id,)).fetchone(); admin=bool(conn.execute("SELECT 1 FROM group_admins WHERE group_id=? AND user_id=?",(group_id,uid)).fetchone()) or (group and group["created_by"]==uid)
     if not admin: conn.close(); return jsonify({"error":"not_allowed"}),403
+    if not group: conn.close(); return jsonify({"error":"group_not_found"}),404
+    if action not in {"approve","reject"}: conn.close(); return jsonify({"error":"invalid_action"}),400
+    pending=conn.execute(
+        "SELECT 1 FROM group_join_requests WHERE group_id=? AND user_id=? AND status='pending'",
+        (group_id,user_id),
+    ).fetchone()
+    if not pending:
+        conn.close(); return jsonify({"error":"request_not_pending"}),409
     if action=="approve":
         conn.execute("INSERT OR IGNORE INTO group_members(group_id,user_id,joined_at) VALUES(?,?,?)",(group_id,user_id,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
         notify_user(conn,user_id,"Join request approved",f"Your request to join {group['name']} was approved.")
     else:
         notify_user(conn,user_id,"Join request rejected",f"Your request to join {group['name']} was rejected.")
-    conn.execute("UPDATE group_join_requests SET status=? WHERE group_id=? AND user_id=?",("approved" if action=="approve" else "rejected",group_id,user_id)); conn.commit(); conn.close(); return redirect(url_for("group_detail",group_id=group_id))
+    conn.execute("UPDATE group_join_requests SET status=? WHERE group_id=? AND user_id=?",("approved" if action=="approve" else "rejected",group_id,user_id))
+    conn.commit(); conn.close(); return redirect(url_for("group_detail",group_id=group_id))
 
 @app.route("/api/groups/<int:group_id>/updates")
 def group_updates(group_id):
