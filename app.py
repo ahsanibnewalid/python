@@ -133,15 +133,20 @@ def save_public_upload(file_storage, filename):
 _original_static_view = app.view_functions.get("static")
 if _original_static_view:
     def _static_with_object_storage(filename):
+        # Serve local cache immediately when it exists; otherwise use the
+        # configured object store. Avoid a per-image HEAD request so profile
+        # and gallery pages remain cheap at scale.
         provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
-        if provider in {"s3", "r2", "b2"} and isinstance(filename, str) and filename.startswith("uploads/"):
-            key = filename[len("uploads/"):]
-            try:
-                storage = get_media_storage()
-                if storage.exists(key):
-                    return redirect(storage.presigned_get_url(key, expires=300))
-            except Exception:
-                app.logger.exception("Public object-storage media lookup failed")
+        if isinstance(filename, str) and filename.startswith("uploads/"):
+            local_path = os.path.join(app.static_folder or "static", filename)
+            if os.path.isfile(local_path):
+                return _original_static_view(filename)
+            if provider in {"s3", "r2", "b2"}:
+                key = filename[len("uploads/"):]
+                try:
+                    return redirect(get_media_storage().presigned_get_url(key, expires=300))
+                except Exception:
+                    app.logger.exception("Public object-storage media lookup failed")
         return _original_static_view(filename)
     app.view_functions["static"] = _static_with_object_storage
 
