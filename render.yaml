@@ -5,7 +5,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 2 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT app:app
+    startCommand: python production_admin_runtime.py
     healthCheckPath: /
     envVars:
       - key: APP_ENV
@@ -20,6 +20,8 @@ services:
         sync: false
       - key: ADMIN_USER
         value: admin
+      - key: ADMIN_BOOTSTRAP_TOKEN
+        sync: false
       - key: TRUST_PROXY
         value: "1"
       - key: REQUIRE_HTTPS
