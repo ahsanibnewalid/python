@@ -131,12 +131,25 @@ def save_public_upload(file_storage, filename):
                 local_path, key, content_type=getattr(file_storage, "mimetype", None)
             )
         except Exception:
-            try:
-                os.remove(local_path)
-            except OSError:
-                pass
+            try: os.remove(local_path)
+            except OSError: pass
             raise
     return local_path
+
+def delete_public_upload(filename_or_path):
+    """Remove a public profile/gallery object from local and object storage."""
+    if not filename_or_path:
+        return
+    name=os.path.basename(str(filename_or_path))
+    if not name:
+        return
+    provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+    if provider in {"s3","r2","b2"}:
+        try: get_media_storage().delete(name)
+        except Exception: app.logger.exception("Public object-storage media deletion failed")
+    try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"],name))
+    except OSError: pass
+
 
 _original_static_view = app.view_functions.get("static")
 if _original_static_view:
@@ -2182,15 +2195,13 @@ def update_cover_photo():
         conn.commit()
     except Exception:
         conn.rollback(); conn.close()
-        try: os.remove(path)
-        except OSError: pass
+        delete_public_upload(path)
         app.logger.exception("Cover photo update failed")
         flash("The cover photo could not be updated. Please try again.","error")
         return redirect(url_for("my_profile"))
     conn.close()
     if old and old["cover_photo"] and old["cover_photo"] != filename:
-        try: os.remove(os.path.join(app.config["UPLOAD_FOLDER"], old["cover_photo"]))
-        except OSError: pass
+        delete_public_upload(old["cover_photo"])
     flash("Cover photo updated and shared to the newsfeed.", "success")
     return redirect(url_for("my_profile"))
 
@@ -4019,7 +4030,7 @@ def view_profile(user_id):
                     conn.execute("UPDATE users SET photo=? WHERE id=?",(new_name,user_id))
                     changed.append("profile photo")
                     if old_photo and old_photo!="default_profile.png":
-                        old_files_to_remove.append(os.path.join(app.config["UPLOAD_FOLDER"],old_photo))
+                        old_files_to_remove.append(old_photo)
 
                 if cover and cover.filename:
                     if not allowed_file(cover.filename) or not validate_image_signature(cover):
@@ -4034,16 +4045,13 @@ def view_profile(user_id):
                     create_media_update_post(conn,user_id,cover_path,"updated their cover photo.")
                     changed.append("cover photo")
                     if old_cover and old_cover!=new_cover:
-                        old_files_to_remove.append(os.path.join(app.config["UPLOAD_FOLDER"],old_cover))
+                        old_files_to_remove.append(old_cover)
 
                 conn.commit()
 
                 # Only remove old files after the DB transaction is durable.
                 for old_path in old_files_to_remove:
-                    try:
-                        os.remove(old_path)
-                    except OSError:
-                        pass
+                    delete_public_upload(old_path)
 
                 flash("Profile media updated successfully.","success") if changed else flash("No media was selected.","info")
                 if changed:
@@ -4051,10 +4059,7 @@ def view_profile(user_id):
             except Exception as exc:
                 conn.rollback()
                 for new_path in new_files:
-                    try:
-                        os.remove(new_path)
-                    except OSError:
-                        pass
+                    delete_public_upload(new_path)
                 flash(f"Profile media update failed: {exc}","error")
 
         # -------------------------------------------------
@@ -4068,8 +4073,9 @@ def view_profile(user_id):
             )
 
             uploaded_count = 0
-
-            for file in gallery_files:
+            new_gallery_files=[]
+            try:
+                for file in gallery_files:
 
                 if not file or not file.filename:
                     continue
@@ -4102,9 +4108,15 @@ def view_profile(user_id):
                     )
                 )
 
-                uploaded_count += 1
+                    new_gallery_files.append(filename)
+                    uploaded_count += 1
 
-            conn.commit()
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                for name in new_gallery_files:
+                    delete_public_upload(name)
+                flash(f"Gallery upload failed: {exc}","error")
 
             if uploaded_count:
 
