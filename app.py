@@ -1880,11 +1880,10 @@ def toggle_post_like(post_id):
     if not user_required(): return jsonify({"error":"login_required"}),401
     require_csrf()
     conn=get_db_connection(); uid=session["user_id"]
-    post=conn.execute("SELECT p.id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
+    post=conn.execute("SELECT p.id,p.user_id,u.university_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",(post_id,)).fetchone()
     viewer=conn.execute("SELECT university_id FROM users WHERE id=?",(uid,)).fetchone()
     if not post: conn.close(); return jsonify({"error":"Post not found"}),404
-    if users_are_blocked(conn, uid, int(post["id"])): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
-    if conn.execute("SELECT 1 FROM user_blocks b JOIN posts p ON p.user_id=b.blocked_id WHERE p.id=? AND b.blocker_id=?",(post_id,uid)).fetchone(): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
+    if users_are_blocked(conn, uid, int(post["user_id"])): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
     if post["university_id"] and viewer and viewer["university_id"] and int(post["university_id"]) != int(viewer["university_id"]): conn.close(); return jsonify({"error":"You cannot react to this post."}),403
     exists=conn.execute("SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)).fetchone()
     if exists: conn.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?",(post_id,uid)); liked=False
@@ -2209,15 +2208,18 @@ def public_profile(user_id):
 
     conn = get_db_connection()
     profile = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return "<h1>Profile not found</h1>", 404
+    if user_id != session["user_id"] and users_are_blocked(conn, session["user_id"], user_id):
+        conn.close()
+        return "<h1>Profile not found</h1>", 404
     gallery = conn.execute(
         "SELECT * FROM gallery WHERE user_id = ? ORDER BY id DESC",
         (user_id,)
     ).fetchall()
     profile_posts = serialize_posts(conn, fetch_user_posts(conn, user_id, 20, 0), session["user_id"])
     conn.close()
-
-    if not profile:
-        return "<h1>Profile not found</h1>", 404
 
     view = profile["profile_view"] if "profile_view" in profile.keys() and profile["profile_view"] in ("facebook", "cv") else "facebook"
     template = "premium_cv_profile.html" if view == "cv" else "facebook_profile.html"
