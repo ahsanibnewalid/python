@@ -2837,20 +2837,25 @@ def mark_notification_read(notification_id):
 def api_notifications():
     if not user_required(): return jsonify({"error":"login_required"}), 401
     conn=get_db_connection(); uid=session["user_id"]
-    # Materialize legacy notifications into the canonical notification feed once.
-    conn.execute(
-        """INSERT INTO platform_notifications(user_id,kind,title,body,url,is_read,created_at)
-           SELECT n.user_id,'legacy',n.title,n.body,'',n.is_read,n.created_at
+    # Materialize legacy notifications only when there are rows to migrate.
+    legacy_rows=conn.execute(
+        """SELECT n.user_id,n.title,n.body,n.is_read,n.created_at
            FROM notifications n
            WHERE n.user_id=?
              AND NOT EXISTS (
                  SELECT 1 FROM platform_notifications p
                  WHERE p.user_id=n.user_id AND p.title=n.title
                    AND p.body=n.body AND p.created_at=n.created_at
-             )""",
+             )
+           LIMIT 50""",
         (uid,)
-    )
-    conn.commit()
+    ).fetchall()
+    if legacy_rows:
+        conn.executemany(
+            "INSERT INTO platform_notifications(user_id,kind,title,body,url,is_read,created_at) VALUES(?,?,?,?,?,?,?)",
+            [(int(n["user_id"]),"legacy",n["title"],n["body"],"",int(n["is_read"]),n["created_at"]) for n in legacy_rows],
+        )
+        conn.commit()
     rows=conn.execute(
         "SELECT id,kind,title,body,url,is_read,created_at FROM platform_notifications WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 50",
         (uid,)
@@ -3041,12 +3046,32 @@ def group_post_like(post_id):
 @app.route("/group-post/<int:post_id>/comment",methods=["POST"])
 def group_post_comment(post_id):
     if not user_required(): return redirect(url_for("user_login"))
-    require_csrf(); conn=get_db_connection(); uid=session["user_id"]; post=conn.execute("SELECT * FROM group_posts WHERE id=?",(post_id,)).fetchone(); member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(post["group_id"],uid)).fetchone() if post else None; comment=request.form.get("comment","").strip()
-    if not post or not member or not comment: conn.close(); flash("Comment cannot be empty.","error"); return redirect(url_for("group_detail",group_id=post["group_id"] if post else 1))
+    require_csrf(); wants_json=request.headers.get("X-Requested-With")=="XMLHttpRequest" or "application/json" in request.headers.get("Accept","")
+    conn=get_db_connection(); uid=session["user_id"]
+    post=conn.execute("SELECT * FROM group_posts WHERE id=?",(post_id,)).fetchone()
+    if not post:
+        conn.close()
+        if wants_json: return jsonify({"error":"Post not found."}),404
+        flash("That group post no longer exists.","error")
+        return redirect(url_for("groups_page"))
+    member=conn.execute("SELECT 1 FROM group_members WHERE group_id=? AND user_id=?",(post["group_id"],uid)).fetchone()
+    comment=request.form.get("comment","").strip()
+    if not member:
+        conn.close()
+        if wants_json: return jsonify({"error":"You must be a member of this group."}),403
+        flash("You must be a group member to comment.","error")
+        return redirect(url_for("group_detail",group_id=post["group_id"]))
+    if not comment or len(comment)>1000:
+        conn.close()
+        if wants_json: return jsonify({"error":"Comment cannot be empty and must be 1000 characters or less."}),400
+        flash("Comment cannot be empty.","error")
+        return redirect(url_for("group_detail",group_id=post["group_id"]))
     conn.execute("INSERT INTO group_post_comments(post_id,user_id,comment,created_at) VALUES(?,?,?,?)",(post_id,uid,comment,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
     if post["user_id"] != uid: notify_user(conn, post["user_id"], "New comment", "Someone commented on your group post.")
     notify_group_admins(conn, post["group_id"], "New group comment", "A new comment was added to a group post.", exclude_user_id=uid)
-    conn.commit(); gid=post["group_id"]; conn.close(); return redirect(url_for("group_detail",group_id=gid))
+    conn.commit(); gid=post["group_id"]; conn.close()
+    if wants_json: return jsonify({"ok":True,"group_id":gid})
+    return redirect(url_for("group_detail",group_id=gid))
 
 @app.route("/groups/<int:group_id>/members/<int:user_id>/remove",methods=["POST"])
 def group_remove_member(group_id,user_id):
