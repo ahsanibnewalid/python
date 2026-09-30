@@ -18,6 +18,18 @@ class MediaStorageError(RuntimeError):
     pass
 
 
+OBJECT_STORAGE_PROVIDERS = {"s3", "r2", "b2"}
+
+
+def object_storage_configured() -> bool:
+    """Return whether the configured S3-compatible backend has all credentials it needs."""
+    provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+    if provider not in OBJECT_STORAGE_PROVIDERS:
+        return False
+    required = ("MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY")
+    return all(os.environ.get(key, "").strip() for key in required)
+
+
 class LocalMediaStorage:
     def __init__(self, root: str):
         self.root = Path(root).resolve()
@@ -107,6 +119,8 @@ class S3MediaStorage:
 
 def build_media_storage():
     provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
-    if provider in {"s3", "r2", "b2"}:
+    if provider == "auto":
+        provider = "s3" if object_storage_configured() else "local"
+    if provider in OBJECT_STORAGE_PROVIDERS:
         return S3MediaStorage()
     return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
