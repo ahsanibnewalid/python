@@ -968,11 +968,14 @@ def install(app, get_db_connection, require_csrf):
         conn = get_db_connection()
         conn.execute(
             """INSERT INTO institution_memberships
-               (institution_id,user_id,role,department_id,title,status,created_at)
-               VALUES(?,?,?,?,?,'active',?)
+               (institution_id,user_id,role,department_id,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+               VALUES(?,?,?,?,?,'active','verified',?,?,?,?,?,?,?)
                ON CONFLICT(institution_id,user_id,role) DO UPDATE SET
-               department_id=excluded.department_id,title=excluded.title,status=excluded.status,created_at=excluded.created_at""",
-            (institution_id,target,role,data.get("department_id") or None,data.get("title",""),_now())
+               department_id=excluded.department_id,title=excluded.title,status='active',verification_status='verified',
+               verified_at=excluded.verified_at,verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,
+               proof_token=excluded.proof_token,proof_original_name=excluded.proof_original_name,
+               verification_note=excluded.verification_note,created_at=excluded.created_at""",
+            (institution_id,target,role,data.get("department_id") or None,data.get("title",""),_now(),user_id(),_now(),"admin_assigned","","","Assigned directly by an authorized administrator.",_now())
         )
         conn.commit(); conn.close()
         return created({"institution_id":institution_id,"user_id":target,"role":role})
@@ -1399,11 +1402,15 @@ def install(app, get_db_connection, require_csrf):
             return json_error("Your role cannot delegate this role.",403)
         conn=get_db_connection()
         conn.execute(
-            """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
-               VALUES(?,?,?,?, 'active',?)
+            """INSERT INTO organization_memberships
+               (organization_id,user_id,role,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+               VALUES(?,?,?,?, 'active','verified',?,?,?,?,?,?,?)
                ON CONFLICT(organization_id,user_id,role) DO UPDATE SET
-               title=excluded.title,status=excluded.status,created_at=excluded.created_at""",
-            (organization_id,target,role,data.get("title",""),_now())
+               title=excluded.title,status='active',verification_status='verified',verified_at=excluded.verified_at,
+               verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,proof_token=excluded.proof_token,
+               proof_original_name=excluded.proof_original_name,verification_note=excluded.verification_note,
+               created_at=excluded.created_at""",
+            (organization_id,target,role,data.get("title",""),_now(),user_id(),_now(),"admin_assigned","","","Assigned directly by an authorized administrator.",_now())
         )
         conn.commit(); conn.close()
         return created({"organization_id":organization_id,"user_id":target,"role":role})
@@ -1503,10 +1510,15 @@ def install(app, get_db_connection, require_csrf):
             (organization_id, target_user_id),
         )
         conn.execute(
-            """INSERT INTO organization_memberships(organization_id,user_id,role,title,status,created_at)
-               VALUES(?,?,?,?, 'active',?)
-               ON CONFLICT(organization_id,user_id,role) DO UPDATE SET title=excluded.title,status='active',created_at=excluded.created_at""",
-            (organization_id, target_user_id, role, title, _now()),
+            """INSERT INTO organization_memberships
+               (organization_id,user_id,role,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+               VALUES(?,?,?,?, 'active','verified',?,?,?,?,?,?,?)
+               ON CONFLICT(organization_id,user_id,role) DO UPDATE SET
+               title=excluded.title,status='active',verification_status='verified',verified_at=excluded.verified_at,
+               verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,proof_token=excluded.proof_token,
+               proof_original_name=excluded.proof_original_name,verification_note=excluded.verification_note,
+               created_at=excluded.created_at""",
+            (organization_id, target_user_id, role, title, _now(),user_id(),_now(),"admin_assigned","","","Assigned directly by an authorized administrator.",_now()),
         )
         notify(conn, target_user_id, "organization_role", "Company role assigned",
                "You are now " + (title or role.replace("_", " ").title()) + ".", "/platform/organizations/" + str(organization_id) + "/office")
@@ -2203,11 +2215,15 @@ def install(app, get_db_connection, require_csrf):
         if not exists:
             conn.close(); return json_error("User not found.",404)
         conn.execute(
-            """INSERT INTO institution_memberships(institution_id,user_id,role,department_id,title,status,created_at)
-               VALUES(?,?,?,?,?,'active',?)
+            """INSERT INTO institution_memberships
+               (institution_id,user_id,role,department_id,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+               VALUES(?,?,?,?,?,'active','verified',?,?,?,?,?,?,?)
                ON CONFLICT(institution_id,user_id,role) DO UPDATE SET
-               department_id=excluded.department_id,title=excluded.title,status='active'""",
-            (institution_id,member_user_id,role,data.get("department_id") or None,data.get("title",""),_now())
+               department_id=excluded.department_id,title=excluded.title,status='active',verification_status='verified',
+               verified_at=excluded.verified_at,verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,
+               proof_token=excluded.proof_token,proof_original_name=excluded.proof_original_name,
+               verification_note=excluded.verification_note""",
+            (institution_id,member_user_id,role,data.get("department_id") or None,data.get("title",""),_now(),user_id(),_now(),"admin_assigned","","","Assigned directly by an authorized administrator.",_now())
         )
         conn.commit(); conn.close()
         return created({"institution_id":institution_id,"user_id":member_user_id,"role":role})
@@ -2502,19 +2518,20 @@ def install(app, get_db_connection, require_csrf):
     def search_all():
         login_required()
         q=str(request.args.get("q","")).strip()
-        if len(q)<2: return jsonify({"institutions":[],"departments":[],"courses":[],"organizations":[],"jobs":[],"users":[]})
+        if len(q)<2: return jsonify({"institutions":[],"departments":[],"courses":[],"organizations":[],"spaces":[],"jobs":[],"users":[]})
         like="%"+q+"%"
         conn=get_db_connection()
         institutions=conn.execute("SELECT id,name,institution_type FROM institutions WHERE name LIKE ? LIMIT 20",(like,)).fetchall()
         departments=conn.execute("SELECT id,university_id,name,code FROM departments WHERE name LIKE ? OR code LIKE ? LIMIT 20",(like,like)).fetchall()
         courses=conn.execute("SELECT id,code,title,department_id FROM courses WHERE title LIKE ? OR code LIKE ? LIMIT 20",(like,like)).fetchall()
         organizations=conn.execute("SELECT id,name,industry FROM organizations WHERE name LIKE ? OR industry LIKE ? LIMIT 20",(like,like)).fetchall()
+        spaces=conn.execute("SELECT slug,kind,display_name,verification_status FROM platform_spaces WHERE display_name LIKE ? ORDER BY display_name LIMIT 30",(like,)).fetchall()
         jobs=conn.execute("SELECT id,title,organization_id,location,work_mode FROM jobs WHERE status='open' AND (title LIKE ? OR skills LIKE ? OR description LIKE ?) LIMIT 20",(like,like,like)).fetchall()
         users=conn.execute("SELECT id,name,username,headline,occupation FROM users WHERE name LIKE ? OR username LIKE ? OR headline LIKE ? LIMIT 20",(like,like,like)).fetchall()
         conn.close()
         return jsonify({k:[dict(x) for x in rows] for k,rows in {
             "institutions":institutions,"departments":departments,"courses":courses,
-            "organizations":organizations,"jobs":jobs,"users":users}.items()})
+            "organizations":organizations,"spaces":spaces,"jobs":jobs,"users":users}.items()})
 
 
     app.register_blueprint(bp)
