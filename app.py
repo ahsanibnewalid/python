@@ -112,6 +112,39 @@ def get_media_storage():
         _MEDIA_STORAGE = build_media_storage()
     return _MEDIA_STORAGE
 
+def public_upload_key(filename):
+    name = secure_filename(filename or "")
+    return name or None
+
+def save_public_upload(file_storage, filename):
+    """Save profile/gallery media locally and mirror it to object storage when configured."""
+    key = public_upload_key(filename)
+    if not key:
+        raise MediaStorageError("Invalid public media filename.")
+    local_path = os.path.join(app.config["UPLOAD_FOLDER"], key)
+    file_storage.save(local_path)
+    provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+    if provider in {"s3", "r2", "b2"}:
+        get_media_storage().upload_path(
+            local_path, key, content_type=getattr(file_storage, "mimetype", None)
+        )
+    return local_path
+
+_original_static_view = app.view_functions.get("static")
+if _original_static_view:
+    def _static_with_object_storage(filename):
+        provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+        if provider in {"s3", "r2", "b2"} and isinstance(filename, str) and filename.startswith("uploads/"):
+            key = filename[len("uploads/"):]
+            try:
+                storage = get_media_storage()
+                if storage.exists(key):
+                    return redirect(storage.presigned_get_url(key, expires=300))
+            except Exception:
+                app.logger.exception("Public object-storage media lookup failed")
+        return _original_static_view(filename)
+    app.view_functions["static"] = _static_with_object_storage
+
 def private_media_key(token, original_name):
     if not token or not original_name:
         return None
@@ -1280,7 +1313,7 @@ def register():
                 if not filename:
                     flash("The profile photo could not be prepared. Please try another image.", "error")
                     return render_template("register.html")
-                file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+                save_public_upload(file, filename)
                 saved_filename = filename
 
             cursor = conn.execute(
@@ -2138,8 +2171,8 @@ def profile_settings():
                     return redirect(url_for("profile_settings"))
                 new_filename = generate_unique_filename(photo.filename, prefix="profile")
                 if new_filename:
+                    save_public_upload(photo, new_filename)
                     profile_photo_path = os.path.join(app.config["UPLOAD_FOLDER"], new_filename)
-                    photo.save(profile_photo_path)
                     filename = new_filename
                     profile_photo_changed = True
 
@@ -3308,12 +3341,7 @@ def home():
                     flash("That Gmail or username is already registered.", "error")
                     return redirect(url_for("home"))
 
-                file.save(
-                    os.path.join(
-                        app.config["UPLOAD_FOLDER"],
-                        filename
-                    )
-                )
+                save_public_upload(file, filename)
 
                 cursor = conn.execute(
                     """
@@ -3818,8 +3846,7 @@ def view_profile(user_id):
                     new_name=generate_unique_filename(photo.filename,prefix="profile")
                     if not new_name:
                         raise ValueError("Could not prepare the new profile image.")
-                    new_path=os.path.join(app.config["UPLOAD_FOLDER"],new_name)
-                    photo.save(new_path)
+                    new_path=save_public_upload(photo,new_name)
                     new_files.append(new_path)
                     old_photo=profile["photo"]
                     conn.execute("UPDATE users SET photo=? WHERE id=?",(new_name,user_id))
@@ -3833,8 +3860,7 @@ def view_profile(user_id):
                     new_cover=generate_unique_filename(cover.filename,prefix="cover")
                     if not new_cover:
                         raise ValueError("Could not prepare the new cover image.")
-                    cover_path=os.path.join(app.config["UPLOAD_FOLDER"],new_cover)
-                    cover.save(cover_path)
+                    cover_path=save_public_upload(cover,new_cover)
                     new_files.append(cover_path)
                     old_cover=profile["cover_photo"]
                     conn.execute("UPDATE users SET cover_photo=? WHERE id=?",(new_cover,user_id))
