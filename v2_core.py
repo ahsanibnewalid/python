@@ -254,6 +254,36 @@ def install(app, get_db_connection, require_csrf):
             (space["organization_id"], uid),
         ).fetchone()
 
+    def save_verification_proof(uploaded):
+        if not uploaded or not uploaded.filename:
+            raise ValueError("A work/study identity proof is required.")
+        original = secure_filename(uploaded.filename)
+        ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+        if ext not in {"pdf","jpg","jpeg","png","webp"}:
+            raise ValueError("Proof must be PDF, JPG, JPEG, PNG or WEBP.")
+        token = secrets.token_urlsafe(36)
+        import app as app_module
+        app_module.save_private_media(uploaded, token, original)
+        return token, original
+
+    def notify_space_admins(conn, space, title, body, url):
+        if space["kind"] == "institution":
+            rows = conn.execute(
+                """SELECT user_id,role FROM institution_memberships
+                   WHERE institution_id=? AND status='active'""",
+                (space["institution_id"],),
+            ).fetchall()
+            admin_ids = [r["user_id"] for r in rows if r["role"] in {"institution_owner","principal","vice_principal","registrar","administrator","coordinator"}]
+        else:
+            rows = conn.execute(
+                """SELECT user_id,role FROM organization_memberships
+                   WHERE organization_id=? AND status='active'""",
+                (space["organization_id"],),
+            ).fetchall()
+            admin_ids = [r["user_id"] for r in rows if "role.manage" in ROLE_PERMISSIONS.get(r["role"], set()) or "organization.manage" in ROLE_PERMISSIONS.get(r["role"], set())]
+        for target in set(admin_ids):
+            notify(conn, target, "membership_request", title, body, url)
+
     # -------------------- schema --------------------
     def init_schema():
         conn = get_db_connection()
@@ -911,20 +941,22 @@ def install(app, get_db_connection, require_csrf):
         if not name:
             return json_error("Institution name is required.")
         conn = get_db_connection()
+        institution_type = str(data.get("institution_type","university")).strip().lower()
         cur = conn.execute(
-            """INSERT INTO institutions(name,institution_type,domain,description,created_at)
-               VALUES(?,?,?,?,?)""",
-            (name, data.get("institution_type","university"), data.get("domain",""),
-             data.get("description",""), _now()),
+            """INSERT INTO institutions(name,institution_type,domain,description,verification_status,created_at)
+               VALUES(?,?,?,?,?,?)""",
+            (name, institution_type, data.get("domain",""), data.get("description",""), "pending", _now()),
         )
         iid = cur.lastrowid
         conn.execute(
-            """INSERT INTO institution_memberships(institution_id,user_id,role,title,created_at)
-               VALUES(?,?,?,?,?)""", (iid,user_id(),"institution_owner","Owner",_now())
+            """INSERT INTO institution_memberships(institution_id,user_id,role,title,status,verification_status,verified_at,verified_by,created_at)
+               VALUES(?,?,?,?, 'active','verified',?,?,?)""",
+            (iid,user_id(),"institution_owner","Owner",_now(),user_id(),_now())
         )
+        space_id = ensure_space(conn, "institution", iid, name, user_id(), "pending")
         conn.commit()
         conn.close()
-        return created({"id": iid, "name": name, "role": "institution_owner"})
+        return created({"id": iid, "name": name, "role": "institution_owner", "space_id": space_id, "public_url": f"/platform/s/{slugify(name)}"})
 
     @bp.post("/institutions/<int:institution_id>/members")
     def add_institution_member(institution_id):
@@ -1340,18 +1372,20 @@ def install(app, get_db_connection, require_csrf):
         data=body(); name=str(data.get("name","")).strip()
         if not name: return json_error("Organization name is required.")
         conn=get_db_connection()
+        organization_type=str(data.get("organization_type","company")).strip().lower()
         cur=conn.execute(
-            """INSERT INTO organizations(name,organization_type,industry,domain,description,created_at)
-               VALUES(?,?,?,?,?,?)""",
-            (name,data.get("organization_type","company"),data.get("industry",""),data.get("domain",""),data.get("description",""),_now())
+            """INSERT INTO organizations(name,organization_type,industry,domain,description,verification_status,created_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (name,organization_type,data.get("industry",""),data.get("domain",""),data.get("description",""),"pending",_now())
         )
         oid=cur.lastrowid
         conn.execute(
-            "INSERT INTO organization_memberships(organization_id,user_id,role,title,created_at) VALUES(?,?,?,?,?)",
-            (oid,user_id(),"organization_owner","Owner",_now())
+            "INSERT INTO organization_memberships(organization_id,user_id,role,title,status,verification_status,verified_at,verified_by,created_at) VALUES(?,?,?,?,?,'verified',?,?,?)",
+            (oid,user_id(),"organization_owner","Owner","active",_now(),user_id(),_now())
         )
+        space_id=ensure_space(conn,"organization",oid,name,user_id(),"pending")
         conn.commit(); conn.close()
-        return created({"id":oid,"name":name,"role":"organization_owner"})
+        return created({"id":oid,"name":name,"role":"organization_owner","space_id":space_id,"public_url":f"/platform/s/{slugify(name)}"})
 
     @bp.post("/organizations/<int:organization_id>/members")
     def add_org_member(organization_id):
@@ -2232,6 +2266,235 @@ def install(app, get_db_connection, require_csrf):
         ).fetchall()
         conn.close()
         return jsonify({"recordings":[dict(x) for x in rows]})
+
+
+    @bp.get("/s/<string:slug>")
+    def public_space(slug):
+        conn = get_db_connection()
+        space = conn.execute("SELECT * FROM platform_spaces WHERE slug=?",(slug,)).fetchone()
+        if not space:
+            conn.close(); abort(404)
+        entity = get_space_entity(conn, space)
+        if not entity:
+            conn.close(); abort(404)
+        viewer = user_id()
+        membership = membership_state(conn, space, viewer) if viewer else None
+        pending = conn.execute(
+            "SELECT id,requested_role,requested_title,proof_kind,status,submitted_at FROM space_membership_requests WHERE space_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
+            (space["id"], viewer),
+        ).fetchone() if viewer else None
+        updates = conn.execute(
+            """SELECT u.id,u.title,u.body,u.update_type,u.pinned,u.created_at,a.name author_name,a.username
+               FROM space_updates u JOIN users a ON a.id=u.author_id
+               WHERE u.space_id=? AND u.status='published'
+               ORDER BY u.pinned DESC,u.created_at DESC,u.id DESC LIMIT 50""",
+            (space["id"],),
+        ).fetchall()
+        notices=[]
+        jobs=[]
+        if space["kind"] == "institution":
+            notices = conn.execute(
+                """SELECT n.id,n.title,n.body,n.priority,n.scope_type,COALESCE(n.published_at,n.created_at) created_at,u.name author_name
+                   FROM notices n JOIN users u ON u.id=n.author_id
+                   WHERE n.institution_id=? ORDER BY COALESCE(n.published_at,n.created_at) DESC,n.id DESC LIMIT 50""",
+                (space["institution_id"],),
+            ).fetchall()
+            member_count = conn.execute("SELECT COUNT(*) FROM institution_memberships WHERE institution_id=? AND status='active'",(space["institution_id"],)).fetchone()[0]
+        else:
+            jobs = conn.execute(
+                """SELECT id,title,department,location,work_mode,employment_type,deadline,description,created_at
+                   FROM jobs WHERE organization_id=? AND status='open' ORDER BY created_at DESC LIMIT 30""",
+                (space["organization_id"],),
+            ).fetchall()
+            member_count = conn.execute("SELECT COUNT(*) FROM organization_memberships WHERE organization_id=? AND status='active'",(space["organization_id"],)).fetchone()[0]
+        is_admin = can_manage_space(viewer, space)
+        requests = conn.execute(
+            """SELECT r.id,r.user_id,r.requested_role,r.requested_title,r.proof_kind,r.proof_original_name,r.proof_note,r.status,r.submitted_at,
+                      u.name,u.username,u.gmail
+               FROM space_membership_requests r JOIN users u ON u.id=r.user_id
+               WHERE r.space_id=? AND r.status='pending' ORDER BY r.submitted_at ASC""",
+            (space["id"],),
+        ).fetchall() if is_admin else []
+        conn.close()
+        return render_template(
+            "space_public.html",
+            space=dict(space), entity=dict(entity), updates=[dict(x) for x in updates],
+            notices=[dict(x) for x in notices], jobs=[dict(x) for x in jobs],
+            member_count=member_count, membership=dict(membership) if membership else None,
+            pending=dict(pending) if pending else None, is_admin=is_admin,
+            requests=[dict(x) for x in requests],
+            role_options=role_options_for_space(space, entity),
+        )
+
+    @bp.post("/s/<string:slug>/membership-request")
+    def request_space_membership(slug):
+        login_required(); require_csrf()
+        conn=get_db_connection()
+        space=space_row(conn,slug)
+        if not space:
+            conn.close(); return json_error("Organization page not found.",404)
+        entity=get_space_entity(conn,space)
+        data=body()
+        role=str(data.get("requested_role","")).strip().lower()
+        title=str(data.get("requested_title","")).strip()[:120]
+        department_id=data.get("department_id") or None
+        note=str(data.get("proof_note","")).strip()[:1000]
+        if role not in role_options_for_space(space,entity):
+            conn.close(); return json_error("Choose a valid role for this organization.",400)
+        active=membership_state(conn,space,user_id())
+        if active and active["status"]=="active":
+            conn.close(); return json_error("You already have an active membership here.",400)
+        pending_row=conn.execute(
+            "SELECT id FROM space_membership_requests WHERE space_id=? AND user_id=? AND status='pending' LIMIT 1",
+            (space["id"],user_id()),
+        ).fetchone()
+        if pending_row:
+            conn.close(); return json_error("You already have a membership request under review.",400)
+        try:
+            proof_token,proof_original=save_verification_proof(request.files.get("proof"))
+            now=_now()
+            cur=conn.execute(
+                """INSERT INTO space_membership_requests
+                   (space_id,user_id,requested_role,requested_title,department_id,proof_kind,proof_token,proof_original_name,proof_note,status,submitted_at)
+                   VALUES(?,?,?,?,?,?,?,?,'identity_proof','pending',?)""",
+                (space["id"],user_id(),role,title,department_id,"work_or_study",proof_token,proof_original,note,now),
+            )
+            request_id=cur.lastrowid
+            notify_space_admins(conn,space,"New membership request",f"A user requested the role '{role}'. Identity proof is ready for review.",f"/platform/s/{slug}")
+            conn.commit()
+        except ValueError as exc:
+            conn.rollback(); conn.close()
+            return json_error(str(exc),400)
+        except Exception:
+            conn.rollback(); conn.close()
+            import app as app_module
+            app_module.app.logger.exception("Membership request failed")
+            return json_error("The membership request could not be submitted.",500)
+        conn.close()
+        return created({"request_id":request_id,"status":"pending"})
+
+    @bp.get("/s/<string:slug>/membership-requests")
+    def list_space_requests(slug):
+        login_required()
+        conn=get_db_connection(); space=space_row(conn,slug)
+        if not space or not can_manage_space(user_id(),space):
+            conn.close(); abort(403)
+        rows=conn.execute(
+            """SELECT r.id,r.user_id,r.requested_role,r.requested_title,r.proof_kind,r.proof_original_name,r.proof_note,r.status,r.submitted_at,
+                      u.name,u.username,u.gmail
+               FROM space_membership_requests r JOIN users u ON u.id=r.user_id
+               WHERE r.space_id=? AND r.status='pending' ORDER BY r.submitted_at ASC""",
+            (space["id"],),
+        ).fetchall()
+        conn.close()
+        return jsonify({"requests":[dict(x) for x in rows]})
+
+    @bp.get("/s/<string:slug>/membership-requests/<int:request_id>/proof")
+    def view_space_proof(slug,request_id):
+        login_required()
+        conn=get_db_connection(); space=space_row(conn,slug)
+        if not space or not can_manage_space(user_id(),space):
+            conn.close(); abort(403)
+        row=conn.execute(
+            "SELECT proof_token,proof_original_name FROM space_membership_requests WHERE id=? AND space_id=?",
+            (request_id,space["id"]),
+        ).fetchone()
+        conn.close()
+        if not row: abort(404)
+        import app as app_module
+        key=app_module.private_media_key(row["proof_token"],row["proof_original_name"])
+        if not key: abort(404)
+        provider=os.environ.get("MEDIA_STORAGE","local").strip().lower()
+        if provider in {"s3","r2","b2"}:
+            try:
+                return redirect(app_module.get_media_storage().presigned_get_url(key,expires=300))
+            except Exception:
+                app_module.app.logger.exception("Verification proof lookup failed")
+                abort(404)
+        path=os.path.join(app_module.PRIVATE_MEDIA_FOLDER,key)
+        if not os.path.isfile(path): abort(404)
+        from flask import send_file
+        return send_file(path,conditional=True,max_age=0)
+
+    @bp.post("/s/<string:slug>/membership-requests/<int:request_id>/decision")
+    def decide_space_request(slug,request_id):
+        login_required(); require_csrf()
+        decision=str(body().get("decision","")).strip().lower()
+        review_note=str(body().get("review_note","")).strip()[:1000]
+        if decision not in {"approve","reject"}:
+            return json_error("Decision must be approve or reject.",400)
+        conn=get_db_connection(); space=space_row(conn,slug)
+        if not space or not can_manage_space(user_id(),space):
+            conn.close(); return json_error("You are not allowed to review membership requests.",403)
+        req=conn.execute("SELECT * FROM space_membership_requests WHERE id=? AND space_id=? AND status='pending'",(request_id,space["id"])).fetchone()
+        if not req:
+            conn.close(); return json_error("Membership request not found.",404)
+        now=_now()
+        if decision=="approve":
+            if space["kind"]=="institution":
+                conn.execute(
+                    """UPDATE institution_memberships
+                       SET status='inactive' WHERE institution_id=? AND user_id=?""",
+                    (space["institution_id"],req["user_id"]),
+                )
+                conn.execute(
+                    """INSERT INTO institution_memberships
+                       (institution_id,user_id,role,department_id,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+                       VALUES(?,?,?,?,?,'active','verified',?,?,?,?,?,?,?,?)
+                       ON CONFLICT(institution_id,user_id,role) DO UPDATE SET
+                       department_id=excluded.department_id,title=excluded.title,status='active',verification_status='verified',
+                       verified_at=excluded.verified_at,verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,
+                       proof_token=excluded.proof_token,proof_original_name=excluded.proof_original_name,verification_note=excluded.verification_note""",
+                    (space["institution_id"],req["user_id"],req["requested_role"],req["department_id"],req["requested_title"],now,user_id(),"work_or_study",req["proof_token"],req["proof_original_name"],review_note,now),
+                )
+            else:
+                conn.execute("UPDATE organization_memberships SET status='inactive' WHERE organization_id=? AND user_id=?",(space["organization_id"],req["user_id"]))
+                conn.execute(
+                    """INSERT INTO organization_memberships
+                       (organization_id,user_id,role,title,status,verification_status,verified_at,verified_by,proof_kind,proof_token,proof_original_name,verification_note,created_at)
+                       VALUES(?,?,?,?, 'active','verified',?,?,?,?,?,?,?)
+                       ON CONFLICT(organization_id,user_id,role) DO UPDATE SET
+                       title=excluded.title,status='active',verification_status='verified',verified_at=excluded.verified_at,
+                       verified_by=excluded.verified_by,proof_kind=excluded.proof_kind,proof_token=excluded.proof_token,
+                       proof_original_name=excluded.proof_original_name,verification_note=excluded.verification_note""",
+                    (space["organization_id"],req["user_id"],req["requested_role"],req["requested_title"],now,user_id(),"work_or_study",req["proof_token"],req["proof_original_name"],review_note,now),
+                )
+            conn.execute(
+                """INSERT INTO space_verification_events(space_id,user_id,action,proof_kind,proof_token,note,actor_id,created_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (space["id"],req["user_id"],"membership_approved","work_or_study",req["proof_token"],review_note,user_id(),now),
+            )
+            notify(conn,req["user_id"],"membership_approved","Membership approved",f"Your verified role '{req['requested_role']}' was approved.","/platform/s/"+slug)
+            status="approved"
+        else:
+            conn.execute(
+                """INSERT INTO space_verification_events(space_id,user_id,action,proof_kind,proof_token,note,actor_id,created_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (space["id"],req["user_id"],"membership_rejected","work_or_study",req["proof_token"],review_note,user_id(),now),
+            )
+            notify(conn,req["user_id"],"membership_rejected","Membership request declined","Your request was not approved. You may submit a new request with updated proof.","/platform/s/"+slug)
+            status="rejected"
+        conn.execute("UPDATE space_membership_requests SET status=?,reviewed_at=?,reviewed_by=?,review_note=? WHERE id=?",(status,now,user_id(),review_note,request_id))
+        conn.commit(); conn.close()
+        return jsonify({"ok":True,"status":status})
+
+    @bp.post("/s/<string:slug>/updates")
+    def publish_space_update(slug):
+        login_required(); require_csrf()
+        conn=get_db_connection(); space=space_row(conn,slug)
+        if not space or not can_manage_space(user_id(),space):
+            conn.close(); return json_error("Update publishing permission required.",403)
+        data=body(); title=str(data.get("title","")).strip()[:180]; body_text=str(data.get("body","")).strip()[:10000]
+        update_type=str(data.get("update_type","announcement")).strip()[:40]
+        pinned=1 if str(data.get("pinned","")).lower() in {"1","true","yes","on"} else 0
+        if not title or not body_text:
+            conn.close(); return json_error("Update title and body are required.",400)
+        cur=conn.execute(
+            "INSERT INTO space_updates(space_id,author_id,update_type,title,body,pinned,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (space["id"],user_id(),update_type,title,body_text,pinned,"published",_now()),
+        )
+        conn.commit(); update_id=cur.lastrowid; conn.close()
+        return created({"id":update_id,"title":title})
 
     @bp.get("/search/all")
     def search_all():
