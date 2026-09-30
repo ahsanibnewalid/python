@@ -58,7 +58,24 @@ def install(app, get_db_connection, init_db):
             created_at TEXT NOT NULL,
             FOREIGN KEY(staff_id) REFERENCES admin_staff(id) ON DELETE SET NULL
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS platform_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            body TEXT DEFAULT '',
+            url TEXT DEFAULT '',
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )""")
         conn.commit(); conn.close()
+
+    def notify_staff(conn, user_id, title, body):
+        if user_id:
+            conn.execute(
+                "INSERT INTO platform_notifications(user_id,kind,title,body,url,is_read,created_at) VALUES(?,?,?,?,?,?,?)",
+                (int(user_id), "moderation", title, body, "/moderator", 0, datetime.utcnow().isoformat()),
+            )
 
     def csrf_ok():
         expected = str(session.get("csrf_token", ""))
@@ -121,6 +138,7 @@ def install(app, get_db_connection, init_db):
         try:
             now=datetime.utcnow().isoformat(); cur=conn.execute("INSERT INTO admin_staff(user_id,username,role,status,created_by,created_at) VALUES(?,?,?,?,?,?)",(user["id"],user["username"],"moderator","active",session.get("admin_username"),now)); staff_id=cur.lastrowid
             for scope in selected: conn.execute("INSERT INTO moderator_scopes(staff_id,scope) VALUES(?,?)",(staff_id,scope))
+            notify_staff(conn, user["id"], "You are now a moderator", "The System Owner assigned you moderation responsibilities: " + ", ".join(SCOPES[s] for s in selected) + ".")
             conn.commit(); flash(f"{user['username']} is now an active moderator.","success")
         except Exception: conn.rollback(); flash("Could not assign moderator: account may already be assigned.","error")
         finally: conn.close()
@@ -134,6 +152,7 @@ def install(app, get_db_connection, init_db):
         conn.execute("DELETE FROM moderator_scopes WHERE staff_id=?",(staff_id,))
         for scope in selected: conn.execute("INSERT INTO moderator_scopes(staff_id,scope) VALUES(?,?)",(staff_id,scope))
         conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"updated_scopes","staff","moderator",str(staff_id),"Responsibilities updated by System Owner",datetime.utcnow().isoformat()))
+        notify_staff(conn, row["user_id"], "Moderator responsibilities updated", "Your moderation responsibilities were updated by the System Owner.")
         conn.commit(); conn.close(); flash("Moderator responsibilities updated.","success"); return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/staff/<int:staff_id>/toggle", methods=["POST"])
@@ -142,7 +161,9 @@ def install(app, get_db_connection, init_db):
         conn=get_db_connection(); row=conn.execute("SELECT status FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if row:
             new_status="suspended" if row["status"]=="active" else "active"
-            conn.execute("UPDATE admin_staff SET status=? WHERE id=?",(new_status,staff_id)); conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"status_changed","staff","moderator",str(staff_id),new_status,datetime.utcnow().isoformat())); conn.commit()
+            conn.execute("UPDATE admin_staff SET status=? WHERE id=?",(new_status,staff_id)); conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,"status_changed","staff","moderator",str(staff_id),new_status,datetime.utcnow().isoformat()))
+            notify_staff(conn, row["user_id"], "Moderator access updated", "Your moderator access is now " + new_status + ".")
+            conn.commit()
         conn.close(); return redirect(url_for("admin_god"))
 
     @app.route("/admin/god/staff/<int:staff_id>/remove", methods=["POST"])
@@ -150,6 +171,8 @@ def install(app, get_db_connection, init_db):
     def admin_god_remove_staff(staff_id):
         conn=get_db_connection(); row=conn.execute("SELECT username FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if not row: conn.close(); abort(404)
+        if row["username"].lower() == os.environ.get("ADMIN_USER","admin").lower():
+            conn.close(); flash("The System Owner account cannot be removed from the moderator team.","error"); return redirect(url_for("admin_god"))
         username=row["username"]
         conn.execute("INSERT INTO moderation_actions(staff_id,action,scope,target_type,target_id,note,created_at) VALUES(?,?,?,?,?,?,?)",(None,"moderator_removed","all","staff",str(staff_id),f"{username} removed by System Owner",datetime.utcnow().isoformat()))
         conn.execute("DELETE FROM admin_staff WHERE id=?",(staff_id,)); conn.commit(); conn.close(); flash(f"{username} was removed from the moderator team.","success"); return redirect(url_for("admin_god"))
@@ -159,9 +182,11 @@ def install(app, get_db_connection, init_db):
     def admin_god_add_work():
         staff_id=request.form.get("staff_id",type=int); scope=request.form.get("scope",""); title=request.form.get("title","").strip(); description=request.form.get("description","").strip()
         if not staff_id or scope not in SCOPES or not title: flash("Work needs a moderator, responsibility and title.","error"); return redirect(url_for("admin_god"))
-        conn=get_db_connection(); allowed=conn.execute("SELECT 1 FROM moderator_scopes WHERE staff_id=? AND scope=?",(staff_id,scope)).fetchone(); status=conn.execute("SELECT status FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
+        conn=get_db_connection(); allowed=conn.execute("SELECT 1 FROM moderator_scopes WHERE staff_id=? AND scope=?",(staff_id,scope)).fetchone(); status=conn.execute("SELECT status,user_id FROM admin_staff WHERE id=?",(staff_id,)).fetchone()
         if not allowed or not status or status["status"]!="active": conn.close(); flash("Moderator is not assigned that responsibility.","error"); return redirect(url_for("admin_god"))
-        conn.execute("INSERT INTO moderator_work(staff_id,scope,title,description,status,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,scope,title,description,"open",session.get("admin_username"),datetime.utcnow().isoformat())); conn.commit(); conn.close(); flash("Moderation work assigned.","success"); return redirect(url_for("admin_god"))
+        conn.execute("INSERT INTO moderator_work(staff_id,scope,title,description,status,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(staff_id,scope,title,description,"open",session.get("admin_username"),datetime.utcnow().isoformat()))
+        notify_staff(conn, status["user_id"], "New moderation work assigned", title + (": " + description if description else ""))
+        conn.commit(); conn.close(); flash("Moderation work assigned.","success"); return redirect(url_for("admin_god"))
 
     @app.route("/moderator", methods=["GET"])
     def moderator_dashboard():
