@@ -1851,18 +1851,16 @@ def create_post():
         conn.commit()
     except ValueError as exc:
         conn.rollback(); conn.close()
-        if saved_path:
-            try: os.remove(saved_path)
-            except OSError: pass
+        if original:
+            remove_private_media(token, original)
         message = str(exc)
         if wants_json: return jsonify({"error": message}), 400
         flash(message, "error")
         return redirect(url_for("user_home")+"#newsfeed")
     except Exception:
         conn.rollback(); conn.close()
-        if saved_path:
-            try: os.remove(saved_path)
-            except OSError: pass
+        if original:
+            remove_private_media(token, original)
         app.logger.exception("Post creation failed")
         message = "The post could not be published. Please try again."
         if wants_json: return jsonify({"error": message}), 500
