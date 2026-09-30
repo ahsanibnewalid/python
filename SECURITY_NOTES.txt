@@ -19,7 +19,9 @@ No web application can honestly be called “unhackable” or completely MITM-pr
 PRODUCTION ENVIRONMENT
 FLASK_SECRET_KEY=<long random secret>
 ADMIN_USER=<admin username>
-ADMIN_PASSWORD_HASH=<Werkzeug password hash>
+ADMIN_USER=<admin username>
+ADMIN_PASSWORD=<one-time bootstrap value only>
+After first admin bootstrap, remove ADMIN_PASSWORD from the deployment environment; PostgreSQL stores the secure password hash.
 COOKIE_SECURE=1
 REQUIRE_HTTPS=1
 TRUST_PROXY=1
@@ -28,7 +30,7 @@ SITE_NAME=University Connect
 Do not commit these secrets to Git.
 
 DEPLOYMENT
-1. Keep database.db and static/uploads.
+1. Keep PostgreSQL as the production database and configure object storage for durable media.
 2. Install Flask/Werkzeug and a production WSGI server such as Gunicorn.
 3. Put Nginx in front of Gunicorn and install a valid TLS certificate.
 4. Use the included nginx_university_site.conf.example as a starting point.
