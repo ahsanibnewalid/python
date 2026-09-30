@@ -58,6 +58,11 @@ def install(flask_app):
 
     @flask_app.before_request
     def _sync_admin_credentials():
+        # Admin credentials are needed only by the admin surface and admin login.
+        # Loading the credential row for every ordinary social/feed request would
+        # add an unnecessary database round-trip to the hottest user paths.
+        if not (request.path == "/login" or request.path.startswith("/admin")):
+            return
         try:
             load_credentials()
         except Exception:
