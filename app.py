@@ -1508,7 +1508,6 @@ def register():
 
         # First-time sign-up ends in the management workspace, not back at login.
         # The password is already hashed above; keep the same session contract as login.
-        session.clear()
         session["user_logged_in"] = True
         session["user_id"] = new_user_id
         session.permanent = True
