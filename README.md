@@ -14,7 +14,7 @@ University Connect is a Flask-based multi-tenant community and management platfo
 - Group owners/admins, membership approval, posts, likes and comments
 - Clubs, events and registrations
 - Blocking/reporting and messaging safety controls
-- E2EE device/key handling, safety-number support and encrypted backup/restore
+- Standard private messaging with blocking, reporting, read receipts and disappearing messages
 
 ### Institutions, campus and academics
 - Universities/institutions and public institution pages
