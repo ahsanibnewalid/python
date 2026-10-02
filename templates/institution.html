@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<h1>{{ i.name }}</h1><p>Role: {{ m.role }}</p><a href='/dashboard'>Dashboard</a><h2>Departments</h2>{% for d in departments %}<section class='card'><h3>{{ d.name }}</h3>{% for c in d.courses %}<p>{{ c.code }} — {{ c.title }}</p>{% endfor %}</section>{% endfor %}{% endblock %}
