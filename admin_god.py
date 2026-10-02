@@ -394,8 +394,16 @@ def install(app, get_db_connection, init_db):
         token, repo, _ = github_config()
         if not token:
             return abort(503, description="APK builder is not configured.")
-        req = urllib.request.Request(
-            "https://api.github.com/repos/%s/actions/artifacts/%s/zip" % (repo, artifact_id),
+        api_url = "https://api.github.com/repos/%s/actions/artifacts/%s/zip" % (repo, artifact_id)
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        # GitHub returns a short-lived signed download URL. Do not send the
+        # API bearer token to that second host; fetch the signed URL separately.
+        api_req = urllib.request.Request(
+            api_url,
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": "Bearer " + token,
@@ -404,21 +412,50 @@ def install(app, get_db_connection, init_db):
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as response:
+            opener = urllib.request.build_opener(_NoRedirect)
+            try:
+                with opener.open(api_req, timeout=30) as response:
+                    signed_url = response.geturl()
+            except urllib.error.HTTPError as exc:
+                if exc.code != 302:
+                    detail = exc.read().decode("utf-8", errors="replace")
+                    raise RuntimeError("GitHub artifact API error %s: %s" % (exc.code, detail[:500]))
+                signed_url = exc.headers.get("Location")
+            if not signed_url:
+                raise RuntimeError("GitHub did not return a signed artifact download URL.")
+
+            with urllib.request.urlopen(
+                urllib.request.Request(
+                    signed_url,
+                    headers={
+                        "Accept": "application/octet-stream",
+                        "User-Agent": "University-Connect-Admin",
+                    },
+                ),
+                timeout=180,
+            ) as response:
                 data = response.read()
+
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                apk_names = [n for n in archive.namelist() if n.lower().endswith(".apk")]
+                apk_names = [
+                    n for n in archive.namelist()
+                    if n.lower().endswith(".apk") and not n.endswith("/")
+                ]
                 if not apk_names:
-                    return abort(502, description="The GitHub artifact does not contain an APK.")
+                    raise RuntimeError("The GitHub artifact does not contain an APK.")
                 apk = archive.read(apk_names[0])
         except Exception as exc:
             app.logger.exception("APK artifact download failed")
             return abort(502, description="Could not retrieve the APK from GitHub: %s" % str(exc)[:300])
+
+        if not apk:
+            return abort(502, description="GitHub returned an empty APK.")
         return send_file(
             io.BytesIO(apk),
             mimetype="application/vnd.android.package-archive",
             as_attachment=True,
             download_name=filename,
+            max_age=0,
         )
 
     @app.route("/admin/god/mobile/download/<int:build_id>", methods=["GET"])
