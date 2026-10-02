@@ -240,7 +240,7 @@ def install(app, get_db_connection, init_db):
         conn = get_db_connection()
         def qcount(sql, params=()):
             row = conn.execute(sql, params).fetchone(); return int((row["c"] if row else 0) or 0)
-        ewhere = " WHERE created_at >= ?" if cutoff else ""
+        ewhere = " WHERE " + ("created_at >= ?" if cutoff else "1=1")
         eparams = (cutoff,) if cutoff else ()
         stats = {
             "active_users": qcount("SELECT COUNT(DISTINCT user_id) AS c FROM usage_events"+ewhere+" AND user_id IS NOT NULL", eparams),
