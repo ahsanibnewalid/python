@@ -1599,172 +1599,10 @@ def user_logout():
 
 @app.route("/user-home")
 def user_home():
+    """Legacy home URL now opens the management workspace instead of social feed."""
     if not user_required():
         return redirect(url_for("user_login"))
-
-    user_id = session["user_id"]
-    search = request.args.get("search", "").strip()
-
-    conn = get_db_connection()
-
-    current_user = conn.execute(
-        "SELECT * FROM users WHERE id = ?",
-        (user_id,)
-    ).fetchone()
-
-    if not current_user:
-        conn.close()
-        session.pop("user_logged_in", None)
-        session.pop("user_id", None)
-        session.modified = True
-        return redirect(url_for("user_login"))
-
-    # People section: searchable so users do not need a separate page.
-    uni_clause, uni_params = same_university_clause(current_user, "users")
-    if search:
-        users = conn.execute(
-            f"""
-            SELECT id, name, gmail, photo, username, nickname, relationship_status
-            FROM users
-            WHERE id != ? {uni_clause}
-              AND NOT EXISTS (
-                  SELECT 1 FROM user_blocks b
-                  WHERE (b.blocker_id=? AND b.blocked_id=users.id)
-                     OR (b.blocker_id=users.id AND b.blocked_id=?)
-              )
-              AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
-            ORDER BY name COLLATE NOCASE
-            LIMIT 50
-            """,
-            (user_id, *uni_params, user_id, user_id, f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%")
-        ).fetchall()
-    else:
-        users = conn.execute(
-            f"""SELECT id, name, gmail, photo, username, nickname, relationship_status
-            FROM users
-            WHERE id != ? {uni_clause}
-              AND NOT EXISTS (
-                  SELECT 1 FROM user_blocks b
-                  WHERE (b.blocker_id=? AND b.blocked_id=users.id)
-                     OR (b.blocker_id=users.id AND b.blocked_id=?)
-              )
-            ORDER BY name COLLATE NOCASE
-            LIMIT 50""",
-            (user_id, *uni_params, user_id, user_id)
-        ).fetchall()
-
-    unread_count = conn.execute(
-        """
-        SELECT COUNT(*) FROM messages
-        WHERE receiver_id = ? AND is_read = 0
-        """,
-        (user_id,)
-    ).fetchone()[0]
-
-    # Community totals are expensive on large installations. Cache each
-    # university's count for a short window so the home page does not perform a
-    # full users-table COUNT on every request.
-    import time
-    cache_key=("community", current_user["university_id"] or 0)
-    cached=_COMMUNITY_COUNT_CACHE.get(cache_key)
-    now_ts=time.time()
-    if cached and cached[0] > now_ts:
-        total_members=cached[1]
-    else:
-        total_members = conn.execute(
-            f"SELECT COUNT(*) FROM users WHERE id != ? {uni_clause}",
-            (user_id, *uni_params)
-        ).fetchone()[0]
-        _COMMUNITY_COUNT_CACHE[cache_key]=(now_ts+60,total_members)
-
-    conversation_count = conn.execute(
-        """
-        SELECT COUNT(*) FROM (
-            SELECT CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id
-            FROM messages
-            WHERE sender_id = ? OR receiver_id = ?
-            GROUP BY other_id
-        )
-        """,
-        (user_id, user_id, user_id)
-    ).fetchone()[0]
-
-    recent_conversations = conn.execute(
-        """
-        WITH recent AS (
-            SELECT
-                CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id,
-                id, message, created_at,
-                ROW_NUMBER() OVER (
-                    PARTITION BY CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END
-                    ORDER BY id DESC
-                ) AS rn
-            FROM messages
-            WHERE sender_id=? OR receiver_id=?
-        ),
-        unread AS (
-            SELECT sender_id AS other_id, COUNT(*) AS unread_count
-            FROM messages
-            WHERE receiver_id=? AND is_read=0
-            GROUP BY sender_id
-        )
-        SELECT u.id,u.name,u.username,u.photo,
-               r.message AS last_message,r.created_at AS last_message_at,
-               COALESCE(unread.unread_count,0) AS unread_count
-        FROM recent r
-        JOIN users u ON u.id=r.other_id
-        LEFT JOIN unread ON unread.other_id=u.id
-        WHERE r.rn=1
-          AND u.id != ?
-          AND NOT EXISTS (
-              SELECT 1 FROM user_blocks b
-              WHERE (b.blocker_id=? AND b.blocked_id=u.id)
-                 OR (b.blocker_id=u.id AND b.blocked_id=?)
-          )
-        ORDER BY r.id DESC
-        LIMIT 5
-        """,
-        (user_id,user_id,user_id,user_id,user_id,user_id,user_id,user_id)
-    ).fetchall()
-
-    joined_groups = conn.execute("""SELECT g.id,g.name,(SELECT COUNT(*) FROM group_members gm2 WHERE gm2.group_id=g.id) member_count
-        FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=? ORDER BY g.name LIMIT 8""", (user_id,)).fetchall()
-    joined_chat_groups = conn.execute("""SELECT cg.id,cg.name,(SELECT COUNT(*) FROM chat_group_members cm2 WHERE cm2.chat_group_id=cg.id) member_count
-        FROM chat_groups cg JOIN chat_group_members cm ON cm.chat_group_id=cg.id WHERE cm.user_id=? ORDER BY cg.name LIMIT 8""", (user_id,)).fetchall()
-    posts = fetch_feed(conn, user_id, 0, 8)
-    feed_posts = serialize_posts(conn, posts, user_id)
-    home_reels = serialize_posts(conn, fetch_reels(conn, user_id, 0, 8), user_id)
-    study_rows = conn.execute("""SELECT r.id,r.title,r.resource_url,r.file_path,c.title course_title,i.name institution_name,u.name author_name,(SELECT COUNT(*) FROM resource_stars rs WHERE rs.resource_id=r.id) star_points,(SELECT COUNT(*) FROM resource_enrollments re WHERE re.resource_id=r.id AND re.status='active') enrollment_count FROM study_resources r JOIN courses c ON c.id=r.course_id JOIN departments d ON d.id=c.department_id JOIN institutions i ON i.id=d.university_id JOIN users u ON u.id=r.author_id WHERE r.status='published' AND r.resource_type='video' AND (r.visibility='public' OR r.author_id=? OR EXISTS(SELECT 1 FROM resource_enrollments re2 WHERE re2.resource_id=r.id AND re2.user_id=? AND re2.status='active') OR EXISTS(SELECT 1 FROM course_enrollments ce WHERE ce.course_id=r.course_id AND ce.user_id=? AND ce.status='active')) ORDER BY star_points DESC,r.created_at DESC LIMIT 8""", (user_id,user_id,user_id)).fetchall()
-    home_study_videos=[]
-    for r in study_rows:
-        item=dict(r)
-        item["video_src"] = item["resource_url"] or (url_for("v2.study_resource_file", resource_id=item["id"]) if item["file_path"] else "")
-        if item["video_src"]:
-            home_study_videos.append(item)
-    stories = serialize_stories(conn, fetch_stories(conn, user_id))
-    conn.close()
-
-    response = make_response(render_template(
-        "user_home.html",
-        current_user=current_user,
-        users=users,
-        unread_count=unread_count,
-        total_members=total_members,
-        conversation_count=conversation_count,
-        recent_conversations=recent_conversations,
-        search=search,
-        feed_posts=feed_posts,
-        home_reels=home_reels,
-        home_study_videos=home_study_videos,
-        stories=stories,
-        joined_groups=joined_groups,
-        joined_chat_groups=joined_chat_groups,
-        csrf=csrf_token()
-    ))
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    return response
-
+    return redirect(url_for("v2.workspace"))
 
 @app.route("/my-dashboard")
 def my_dashboard():
@@ -3720,9 +3558,7 @@ def is_mobile_browser():
 
 
 def preferred_user_home():
-    """Workspace-first on desktop/laptop; social + reels-first on mobile."""
-    if is_mobile_browser():
-        return url_for("user_home")
+    """Use the institution-management workspace on every device."""
     return url_for("v2.workspace")
 
 
