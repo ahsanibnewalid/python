@@ -2814,6 +2814,8 @@ def appearance_settings():
         if theme not in {'light','dark','system'}: theme='light'
         session['theme']=theme
         conn.close()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept",""):
+            return jsonify({"ok":True,"theme":theme})
         flash('Appearance updated.', 'success')
         return redirect(url_for('appearance_settings'))
     conn.close()
