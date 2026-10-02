@@ -274,6 +274,50 @@ def install(app, get_db_connection, init_db):
             conn.close()
         return row
 
+
+    @app.route("/admin/god/github/test", methods=["GET"])
+    @owner_required
+    def admin_god_github_test():
+        token, repo, workflow = github_config()
+        if not token:
+            return jsonify({
+                "connected": False,
+                "repository": repo,
+                "workflow": workflow,
+                "message": "GITHUB_ACTIONS_TOKEN is not configured on the server.",
+            }), 503
+        try:
+            repo_status, repo_data = github_json("GET", "/repos/%s" % repo)
+            workflow_status, workflow_data = github_json(
+                "GET",
+                "/repos/%s/actions/workflows/%s" % (repo, urllib.parse.quote(workflow, safe="")),
+            )
+            permissions = repo_data.get("permissions") or {}
+            return jsonify({
+                "connected": True,
+                "repository": repo,
+                "workflow": workflow,
+                "repository_status": repo_status,
+                "workflow_status": workflow_status,
+                "repository_private": bool(repo_data.get("private")),
+                "repository_default_branch": repo_data.get("default_branch"),
+                "token_permissions": {
+                    key: bool(permissions.get(key))
+                    for key in ("admin", "maintain", "push", "triage", "pull")
+                    if key in permissions
+                },
+                "workflow_name": workflow_data.get("name") or workflow,
+                "workflow_state": workflow_data.get("state"),
+                "message": "GitHub repository and APK workflow are reachable.",
+            })
+        except Exception as exc:
+            return jsonify({
+                "connected": False,
+                "repository": repo,
+                "workflow": workflow,
+                "message": str(exc)[:700],
+            }), 502
+
     @app.route("/admin/god/mobile/build", methods=["POST"])
     @owner_required
     def admin_god_mobile_build():
