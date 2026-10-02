@@ -87,6 +87,28 @@ def install(app, get_db_connection, require_csrf):
         conn.close()
         return bool(row and permission in ROLE_PERMISSIONS.get(row["role"], set()))
 
+    def can_view_course(uid, course_id):
+        conn=get_db_connection()
+        row=conn.execute(
+            """SELECT c.id,c.teacher_id,d.university_id
+               FROM courses c JOIN departments d ON d.id=c.department_id
+               WHERE c.id=?""",(course_id,)
+        ).fetchone()
+        if not row:
+            conn.close(); return False
+        if int(row["teacher_id"] or 0)==int(uid):
+            conn.close(); return True
+        enrolled=conn.execute(
+            "SELECT 1 FROM course_enrollments WHERE course_id=? AND user_id=? AND COALESCE(status,'active')='active' LIMIT 1",
+            (course_id,uid)
+        ).fetchone()
+        member=conn.execute(
+            "SELECT 1 FROM institution_memberships WHERE institution_id=? AND user_id=? AND status='active' LIMIT 1",
+            (row["university_id"],uid)
+        ).fetchone()
+        conn.close()
+        return bool(enrolled or member)
+
     def can_organization(uid, organization_id, permission):
         conn = get_db_connection()
         row = conn.execute(
@@ -1435,7 +1457,7 @@ def install(app, get_db_connection, require_csrf):
         login_required()
         conn = get_db_connection()
         membership = conn.execute(
-            """SELECT m.role,m.title,u.name,u.email,o.name organization_name,o.industry,o.description
+            """SELECT m.role,m.title,u.name,u.gmail,o.name organization_name,o.industry,o.description
                FROM organization_memberships m
                JOIN organizations o ON o.id=m.organization_id
                JOIN users u ON u.id=m.user_id
@@ -1446,7 +1468,7 @@ def install(app, get_db_connection, require_csrf):
             conn.close()
             abort(403)
         members = conn.execute(
-            """SELECT m.user_id,m.role,m.title,m.status,u.name,u.email
+            """SELECT m.user_id,m.role,m.title,m.status,u.name,u.gmail
                FROM organization_memberships m JOIN users u ON u.id=m.user_id
                WHERE m.organization_id=? AND m.status='active'
                ORDER BY CASE WHEN m.role='organization_owner' THEN 0 ELSE 1 END,u.name""",
@@ -1480,8 +1502,8 @@ def install(app, get_db_connection, require_csrf):
         like = "%" + q + "%"
         conn = get_db_connection()
         rows = conn.execute(
-            """SELECT id,name,email FROM users
-               WHERE (name LIKE ? OR email LIKE ?) AND id != ?
+            """SELECT id,name,gmail FROM users
+               WHERE ((?:name LIKE ? OR gmail LIKE ?)) AND id != ?
                ORDER BY name LIMIT 20""",
             (like, like, user_id()),
         ).fetchall()
@@ -1636,7 +1658,11 @@ def install(app, get_db_connection, require_csrf):
         login_required(); require_csrf()
         data=body(); conn=get_db_connection()
         job=conn.execute("SELECT id,organization_id,posted_by,title FROM jobs WHERE id=? AND status='open'",(job_id,)).fetchone()
-        if not job: conn.close(); return json_error("Job is not open.",404)
+        if not job:
+            conn.close(); return json_error("Job is not open.",404)
+        existing=conn.execute("SELECT id FROM job_applications WHERE job_id=? AND applicant_id=?",(job_id,user_id())).fetchone()
+        if existing:
+            conn.close(); return json_error("You already applied for this job.",409)
         cv=conn.execute("SELECT * FROM cv_profiles WHERE user_id=?",(user_id(),)).fetchone()
         snapshot=dict(cv) if cv else {}
         try:
@@ -1650,21 +1676,19 @@ def install(app, get_db_connection, require_csrf):
                 "INSERT INTO application_events(application_id,actor_id,to_status,note,created_at) VALUES(?,?,?,?,?)",
                 (aid,user_id(),"applied","Application submitted.",_now())
             )
-            notify(conn, job["posted_by"], "job_application", "New job application", job["title"], "/platform/ui/workspace")
+            notify(conn,job["posted_by"],"job_application","New job application",job["title"],"/platform/ui/workspace")
+            cur=conn.execute(
+                "INSERT INTO conversations(subject,context_type,context_id,created_by,created_at) VALUES(?,?,?,?,?)",
+                ("Job application: "+job["title"],"job_application",aid,user_id(),_now())
+            )
+            conversation_id=cur.lastrowid
+            conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(conversation_id,user_id(),"applicant",_now()))
+            conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(conversation_id,job["posted_by"],"recruiter",_now()))
             conn.commit()
         except Exception:
-            conn.rollback(); conn.close(); return json_error("You already applied for this job.")
-        # Automatically create a job-linked conversation between applicant and recruiter/poster.
-        cur=conn.execute(
-            "INSERT INTO conversations(subject,context_type,context_id,created_by,created_at) VALUES(?,?,?,?,?)",
-            ("Job application: "+job["title"],"job_application",aid,user_id(),_now())
-        )
-        conversation_id=cur.lastrowid
-        conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",
-                     (conversation_id,user_id(),"applicant",_now()))
-        conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",
-                     (conversation_id,job["posted_by"],"recruiter",_now()))
-        conn.commit(); conn.close()
+            conn.rollback(); conn.close(); app.logger.exception("Job application creation failed")
+            return json_error("The application could not be submitted.",500)
+        conn.close()
         return created({"application_id":aid,"conversation_id":conversation_id,"status":"applied"})
 
     @bp.post("/applications/<int:application_id>/status")
@@ -2138,6 +2162,10 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/institutions/<int:institution_id>/notices")
     def institution_notices(institution_id):
         login_required()
+        conn_check=get_db_connection()
+        member=conn_check.execute("SELECT 1 FROM institution_memberships WHERE institution_id=? AND user_id=? AND status='active'",(institution_id,user_id())).fetchone()
+        conn_check.close()
+        if not member: return json_error("Institution access denied.",403)
         conn=get_db_connection()
         rows=conn.execute(
             """SELECT n.*,u.name author_name,d.name department_name
@@ -2152,6 +2180,8 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/courses/<int:course_id>")
     def course_detail(course_id):
         login_required()
+        if not can_view_course(user_id(),course_id):
+            return json_error("Course access denied.",403)
         conn=get_db_connection()
         course=conn.execute(
             """SELECT c.*,d.name department_name,p.name program_name,u.name teacher_name
@@ -2177,6 +2207,10 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/institutions/<int:institution_id>/courses")
     def institution_courses(institution_id):
         login_required()
+        conn_check=get_db_connection()
+        member=conn_check.execute("SELECT 1 FROM institution_memberships WHERE institution_id=? AND user_id=? AND status='active'",(institution_id,user_id())).fetchone()
+        conn_check.close()
+        if not member: return json_error("Institution access denied.",403)
         conn=get_db_connection()
         rows=conn.execute(
             """SELECT c.*,d.name department_name,p.name program_name,u.name teacher_name
@@ -2190,6 +2224,10 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/institutions/<int:institution_id>/departments")
     def institution_departments(institution_id):
         login_required()
+        conn_check=get_db_connection()
+        member=conn_check.execute("SELECT 1 FROM institution_memberships WHERE institution_id=? AND user_id=? AND status='active'",(institution_id,user_id())).fetchone()
+        conn_check.close()
+        if not member: return json_error("Institution access denied.",403)
         conn=get_db_connection()
         rows=conn.execute(
             """SELECT d.*,COUNT(DISTINCT p.id) program_count,COUNT(DISTINCT c.id) course_count
@@ -2275,6 +2313,8 @@ def install(app, get_db_connection, require_csrf):
     @bp.get("/courses/<int:course_id>/recordings")
     def course_recordings(course_id):
         login_required()
+        if not can_view_course(user_id(),course_id):
+            return json_error("Course access denied.",403)
         conn=get_db_connection()
         rows=conn.execute(
             """SELECT r.*,u.name teacher_name,c.title course_title

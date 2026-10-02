@@ -4,4 +4,4 @@ Kept: existing social, profile, network, groups, reels, stories, messaging, jobs
 
 Removed: separate sound/audio editing from video editing.
 
-Not confirmed: previously reported Render POST/write/upload flows, optional E2EE chat setup, and browser-dependent video export; these require live runtime verification.
+Not confirmed: previously reported Render POST/write/upload flows and browser-dependent video export; these require live runtime verification.

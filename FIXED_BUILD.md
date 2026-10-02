@@ -16,16 +16,12 @@ This build contains the security, database, media, authentication, social-feed, 
 - Users can edit and delete their own posts from the feed and their own Facebook-style profile.
 - Like/react and comment actions are wired to the same backend endpoints from the feed and profile.
 - Chat read-state logic respects blocking and expired messages.
-- E2EE is now optional per one-to-one conversation. Normal messages are allowed when E2EE is off; encrypted messages are used when the user explicitly enables E2EE in Chat settings.
-- E2EE key derivation uses a symmetric public-key-derived salt so sender and recipient derive the same AES key.
-- The three-dot chat menu no longer controls E2EE.
 - Added open chat groups that users can create and join.
 - Added linked chat groups that copy the current members of an existing UniversityConnect social group.
 - Added chat-group messaging, membership, join/leave behavior, and polling.
 - Added chat-group navigation from Messages and existing social-group pages.
 - User media is cleaned when a user is deleted.
 - Profile/cover automatic feed-post creation is transactional with the profile update.
-- Expanded automated tests for optional E2EE, post editing/reactions/comments, device ownership, story cleanup, and chat groups.
 
 ## Security configuration
 
