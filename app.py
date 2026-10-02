@@ -237,6 +237,8 @@ if not ADMIN_PASSWORD_HASH:
 # ---------------------------------------------------------
 # Database
 # ---------------------------------------------------------
+# Social relationship and profile-time preferences are migrated in init_db.
+
 
 # ---------------------------------------------------------
 # Database compatibility layer
