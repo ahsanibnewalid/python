@@ -578,6 +578,53 @@ def notifications():
     return jsonify({"notifications": out[:50]})
 
 
+
+@bp.get("/conversations")
+@mobile_auth
+def conversations():
+    uid = g.mobile_user_id
+    conn = bp.app_module.get_db_connection()
+    rows = conn.execute(
+        """SELECT
+               CASE WHEN m.sender_id=? THEN m.receiver_id ELSE m.sender_id END AS other_user_id,
+               MAX(m.id) AS last_id,
+               MAX(m.created_at) AS last_created_at
+           FROM messages m
+           WHERE m.sender_id=? OR m.receiver_id=?
+           GROUP BY CASE WHEN m.sender_id=? THEN m.receiver_id ELSE m.sender_id END
+           ORDER BY last_id DESC LIMIT 50""",
+        (uid, uid, uid, uid),
+    ).fetchall()
+    result = []
+    for row in rows:
+        other_id = int(row["other_user_id"])
+        if bp.app_module.users_are_blocked(conn, uid, other_id):
+            continue
+        user = conn.execute(
+            "SELECT id,name,username,photo FROM users WHERE id=?",
+            (other_id,),
+        ).fetchone()
+        last = conn.execute(
+            "SELECT message,ciphertext,encryption_version,created_at FROM messages WHERE id=?",
+            (row["last_id"],),
+        ).fetchone()
+        unread = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE sender_id=? AND receiver_id=? AND is_read=0",
+            (other_id, uid),
+        ).fetchone()[0]
+        result.append({
+            "other_user_id": other_id,
+            "name": user["name"] if user else "",
+            "username": user["username"] if user else "",
+            "photo_url": public_photo_url(user["photo"]) if user else None,
+            "last_message": (last["message"] if last else ""),
+            "encryption_version": int(last["encryption_version"]) if last else 0,
+            "last_created_at": (last["created_at"] if last else ""),
+            "unread_count": int(unread or 0),
+        })
+    conn.close()
+    return jsonify({"conversations": result})
+
 @bp.get("/messages/<int:other_user_id>")
 @mobile_auth
 def messages(other_user_id):
