@@ -17,7 +17,7 @@ bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 ACCESS_TTL = max(300, int(os.environ.get("MOBILE_ACCESS_TTL_SECONDS", "1800")))
 REFRESH_TTL = max(3600, int(os.environ.get("MOBILE_REFRESH_TTL_SECONDS", str(60 * 60 * 24 * 30))))
-MEDIA_URL_TTL = max(60, min(3600, int(os.environ.get("MOBILE_MEDIA_URL_TTL_SECONDS", "300")))
+MEDIA_URL_TTL = max(60, min(3600, int(os.environ.get("MOBILE_MEDIA_URL_TTL_SECONDS", "300"))))
 
 
 def install(app_module):
