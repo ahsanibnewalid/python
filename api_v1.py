@@ -277,6 +277,48 @@ def auth_login():
     })
 
 
+
+@bp.post("/auth/register")
+def auth_register():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()[:120]
+    username = str(data.get("username", "")).strip().lower()[:80]
+    gmail = str(data.get("gmail", "")).strip().lower()[:160]
+    phone = bp.app_module.normalize_phone(str(data.get("phone", "")).strip())
+    password = str(data.get("password", ""))
+    confirm = str(data.get("confirm_password", password))
+    if not name or not username or not gmail or not phone or not password:
+        return json_error("name_username_gmail_phone_password_required", 400)
+    if not bp.app_module.valid_gmail(gmail):
+        return json_error("valid_gmail_required", 400)
+    if not bp.app_module.valid_phone(phone):
+        return json_error("valid_phone_required", 400)
+    if len(password) < 6 or password != confirm:
+        return json_error("password_invalid_or_mismatch", 400)
+    conn = bp.app_module.get_db_connection()
+    duplicate = conn.execute(
+        "SELECT id FROM users WHERE lower(gmail)=? OR lower(username)=? OR phone=?",
+        (gmail, username, phone),
+    ).fetchone()
+    if duplicate:
+        conn.close()
+        return json_error("account_already_exists", 409)
+    cursor = conn.execute(
+        "INSERT INTO users(name,gmail,phone,photo,username,password_hash) VALUES(?,?,?,?,?,?)",
+        (name, gmail, phone, "default_profile.png", username,
+         bp.app_module.generate_password_hash(password)),
+    )
+    uid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({
+        "access_token": issue_access(uid),
+        "refresh_token": issue_refresh(uid, request.headers.get("User-Agent", "")),
+        "token_type": "Bearer", "expires_in": ACCESS_TTL, "refresh_expires_in": REFRESH_TTL,
+        "user": mobile_user(uid),
+    }), 201
+
+
 @bp.post("/auth/refresh")
 def auth_refresh():
     data = request.get_json(silent=True) or {}
@@ -328,6 +370,53 @@ def auth_logout():
 def me():
     return jsonify({"user": mobile_user(g.mobile_user_id)})
 
+
+
+@bp.patch("/me")
+@mobile_auth
+def update_me():
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        "name": 120, "username": 80, "gmail": 160, "phone": 30,
+        "bio": 5000, "headline": 300, "occupation": 200, "company": 200,
+        "website": 500, "education": 2000, "skills": 2000, "experience": 5000,
+        "achievements": 5000, "interests": 2000, "projects": 5000,
+        "certifications": 2000, "career_objective": 3000,
+    }
+    updates = {}
+    for key, limit in allowed.items():
+        if key in data:
+            value = str(data[key] if data[key] is not None else "").strip()[:limit]
+            if key == "username":
+                value = value.lower()
+            if key == "gmail":
+                value = value.lower()
+            if key == "phone":
+                value = bp.app_module.normalize_phone(value)
+            updates[key] = value
+    if "gmail" in updates and not bp.app_module.valid_gmail(updates["gmail"]):
+        return json_error("valid_gmail_required", 400)
+    if "phone" in updates and not bp.app_module.valid_phone(updates["phone"]):
+        return json_error("valid_phone_required", 400)
+    conn = bp.app_module.get_db_connection()
+    for key in ("gmail", "username", "phone"):
+        if key in updates:
+            duplicate = conn.execute(
+                f"SELECT id FROM users WHERE {key}=? AND id!=?",
+                (updates[key], g.mobile_user_id),
+            ).fetchone()
+            if duplicate:
+                conn.close()
+                return json_error(f"{key}_already_used", 409)
+    if updates:
+        fields = ", ".join(f"{key}=?" for key in updates)
+        conn.execute(
+            f"UPDATE users SET {fields} WHERE id=?",
+            (*updates.values(), g.mobile_user_id),
+        )
+        conn.commit()
+    conn.close()
+    return jsonify({"user": mobile_user(g.mobile_user_id)})
 
 @bp.get("/feed")
 @mobile_auth
