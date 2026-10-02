@@ -27,6 +27,6 @@ export const commentPost=(id:number,comment:string)=>jsonRequest<{ok:boolean;com
 export const getConversations=()=>apiRequest<{conversations:Conversation[]}>("/conversations");
 export const getMessages=(id:number,since=0)=>apiRequest<{messages:Message[];blocked:boolean}>("/messages/"+id+"?since_id="+since);
 export const sendMessage=(id:number,message:string)=>jsonRequest<{ok:boolean;message:Message}>("/messages/"+id,"POST",{message});
-export const getNotifications=()=>apiRequest<{notifications:Array<Record<string,unknown>}>("/notifications");
+export const getNotifications=()=>apiRequest<{notifications:Array<Record<string,unknown>>}>("/notifications");
 export const search=(q:string)=>apiRequest<{users:SearchUser[];spaces:SearchSpace[]}>("/search?q="+encodeURIComponent(q));
 export const getWorkspace=()=>apiRequest<Workspace>("/workspace");
