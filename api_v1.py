@@ -461,7 +461,7 @@ def create_story():
         }), 201
     except Exception:
         bp.app_module.remove_private_media(token, original)
-        raise
+        return json_error("story_create_failed", 500)
 
 
 @bp.post("/posts/<int:post_id>/like")
@@ -677,6 +677,53 @@ def send_message(receiver_id):
         },
     }), 201
 
+
+
+@bp.get("/search")
+@mobile_auth
+def search():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"users": [], "spaces": []})
+    like = f"%{q}%"
+    conn = bp.app_module.get_db_connection()
+    current = conn.execute("SELECT university_id FROM users WHERE id=?", (g.mobile_user_id,)).fetchone()
+    uni_id = current["university_id"] if current else None
+    rows = conn.execute(
+        """SELECT id,name,username,photo,headline,university_id
+           FROM users
+           WHERE id!=?
+             AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
+             AND NOT EXISTS (
+                 SELECT 1 FROM user_blocks b
+                 WHERE (b.blocker_id=? AND b.blocked_id=users.id)
+                    OR (b.blocker_id=users.id AND b.blocked_id=?)
+             )
+           ORDER BY name COLLATE NOCASE LIMIT 40""",
+        (g.mobile_user_id, like, like, like, like, g.mobile_user_id, g.mobile_user_id),
+    ).fetchall()
+    users = []
+    for row in rows:
+        if uni_id is not None and row["university_id"] not in (None, uni_id):
+            continue
+        users.append({
+            "id": row["id"], "name": row["name"], "username": row["username"],
+            "headline": row["headline"], "photo_url": public_photo_url(row["photo"]),
+        })
+    spaces = []
+    try:
+        space_rows = conn.execute(
+            """SELECT id,kind,name,slug,verification_status
+               FROM platform_spaces
+               WHERE name LIKE ? OR slug LIKE ?
+               ORDER BY name COLLATE NOCASE LIMIT 20""",
+            (like, like),
+        ).fetchall()
+        spaces = [dict(row) for row in space_rows]
+    except Exception:
+        pass
+    conn.close()
+    return jsonify({"users": users[:20], "spaces": spaces})
 
 @bp.get("/workspace")
 @mobile_auth
