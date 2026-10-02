@@ -2766,8 +2766,6 @@ def format_user_datetime(value, timezone_name="Asia/Dhaka", time_format="12h"):
     except Exception:
         return str(value)
 
-app.jinja_filter("user_datetime")(format_user_datetime)
-
 @app.route("/profile/<int:user_id>")
 def public_profile(user_id):
     if not user_required():
