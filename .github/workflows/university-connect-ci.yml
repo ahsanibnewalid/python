@@ -31,3 +31,20 @@ jobs:
           PY
       - run: python -m pytest -q
       - run: python -c "import app; app.init_db(); print('Application imports and DB initialization succeeds.')"
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.1"
+      - name: Install mobile dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck Expo app
+        run: npm run typecheck
+      - name: Export Android bundle
+        run: npx expo export --platform android
