@@ -107,11 +107,7 @@ class S3MediaStorage:
 def build_media_storage():
     provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
     if provider in {"s3", "r2", "b2"}:
-        if not os.environ.get("MEDIA_S3_BUCKET", "").strip():
-            return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
-        try:
-            return S3MediaStorage()
-        except Exception as exc:
-            print(f"WARNING: object storage unavailable; using local media storage: {exc}")
-            return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
+        # Production object storage must fail fast. Falling back to Render's
+        # ephemeral filesystem can silently lose uploads after a restart.
+        return S3MediaStorage()
     return LocalMediaStorage(os.environ.get("MEDIA_LOCAL_ROOT", "private_media/posts"))
