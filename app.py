@@ -1526,20 +1526,39 @@ def register():
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    """Lightweight deployment health endpoint for Render and uptime checks."""
+    """Report service readiness without treating optional media storage as fatal.
+
+    Render uses this endpoint to decide whether the web process is healthy.
+    Missing S3/R2/B2 credentials should be visible in diagnostics, but must not
+    take the whole management system offline: database connectivity is the
+    critical readiness check. Uploads that require an unconfigured object store
+    will still report their own actionable error.
+    """
+    conn = None
     try:
         conn = get_db_connection()
         conn.execute("SELECT 1").fetchone()
-        conn.close()
         provider = os.environ.get("MEDIA_STORAGE", "local").strip().lower()
+        media_status = provider
         if provider in {"s3", "r2", "b2"}:
             required = ("MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY")
             if not all(os.environ.get(key, "").strip() for key in required):
-                return jsonify({"status": "degraded", "database": "ok", "media_storage": "misconfigured"}), 503
-        return jsonify({"status": "ok", "database": "ok", "media_storage": provider}), 200
+                media_status = "misconfigured"
+                app.logger.error(
+                    "Media storage is configured as %s but required credentials are missing.",
+                    provider,
+                )
+        return jsonify({
+            "status": "ok",
+            "database": "ok",
+            "media_storage": media_status,
+        }), 200
     except Exception:
         app.logger.exception("Health check failed")
-        return jsonify({"status": "error"}), 503
+        return jsonify({"status": "error", "database": "unavailable"}), 503
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.before_request
