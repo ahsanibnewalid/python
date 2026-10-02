@@ -26,7 +26,6 @@
 
 5. **SQLite messaging stability**
    - Added a 10-second SQLite busy timeout and WAL mode to reduce `database is locked` errors during polling.
-   - E2EE device registration now updates an existing device before attempting an insert, with a race-safe retry.
 
 ## Log evidence addressed
 
