@@ -1,0 +1,9 @@
+{
+  "expo":{"name":"UniversityConnect","slug":"university-connect","version":"1.0.0",
+    "orientation":"portrait","scheme":"universityconnect","userInterfaceStyle":"automatic",
+    "newArchEnabled":true,
+    "plugins":["expo-router","expo-secure-store",["expo-image-picker",{"microphonePermission":false}],"expo-video"],
+    "experiments":{"typedRoutes":true},
+    "android":{"package":"com.universityconnect.app"}
+  }
+}
