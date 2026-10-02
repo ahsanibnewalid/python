@@ -2833,80 +2833,17 @@ def chat_preferences(user_id):
         theme=data.get('theme','default'); wallpaper=data.get('wallpaper','none')
         try: disappear=max(0,min(int(data.get('disappearing_seconds',0)),604800))
         except Exception: disappear=0
-        e2ee=1 if bool(data.get('e2ee_enabled',False)) else 0
         if theme not in {'default','dark','light','midnight','forest'}: theme='default'
         if wallpaper not in {'none','dots','gradient','paper','night'}: wallpaper='none'
-        if e2ee:
-            own_key=get_public_key(conn,session['user_id'])
-            if not own_key:
-                conn.close(); return jsonify({'error':'Your browser has not created a secure key yet. Turn on E2EE again to initialize it.','requires_keys':True}),409
-        row=conn.execute('SELECT user_id FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone()
-        if row:
-            conn.execute('UPDATE chat_preferences SET theme=?,wallpaper=?,disappearing_seconds=?,e2ee_enabled=?,updated_at=? WHERE user_id=? AND peer_id=?',(theme,wallpaper,disappear,e2ee,now,session['user_id'],user_id))
-        else:
-            conn.execute('INSERT INTO chat_preferences(user_id,peer_id,theme,wallpaper,disappearing_seconds,e2ee_enabled,updated_at) VALUES(?,?,?,?,?,?,?)',(session['user_id'],user_id,theme,wallpaper,disappear,e2ee,now))
-        conn.commit(); conn.close(); return jsonify({'ok':True,'theme':theme,'wallpaper':wallpaper,'disappearing_seconds':disappear,'e2ee_enabled':bool(e2ee)})
-    row=conn.execute('SELECT theme,wallpaper,disappearing_seconds,e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone()
-    peer_pref=conn.execute('SELECT e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(user_id,session['user_id'])).fetchone()
+        conn.execute("""INSERT INTO chat_preferences(user_id,peer_id,theme,wallpaper,disappearing_seconds)
+                        VALUES(?,?,?,?,?)
+                        ON CONFLICT(user_id,peer_id) DO UPDATE SET
+                        theme=excluded.theme,wallpaper=excluded.wallpaper,disappearing_seconds=excluded.disappearing_seconds""",
+                     (session['user_id'],user_id,theme,wallpaper,disappear))
+        conn.commit()
+    row=conn.execute('SELECT theme,wallpaper,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?',(session['user_id'],user_id)).fetchone()
     conn.close()
-    return jsonify(dict(row) if row else {'theme':'default','wallpaper':'none','disappearing_seconds':0,'e2ee_enabled':False,'peer_e2ee_enabled':bool(peer_pref and peer_pref['e2ee_enabled'])})
-
-@app.route('/api/e2ee/safety-number/<int:user_id>')
-def safety_number(user_id):
-    if not user_required(): return jsonify({'error':'login_required'}),401
-    import hashlib
-    conn=get_db_connection(); a=get_public_key(conn,session['user_id']); b=get_public_key(conn,user_id); conn.close()
-    if not a or not b: return jsonify({'error':'keys_not_ready'}),404
-    material='|'.join(sorted([a,b])).encode(); digest=hashlib.sha256(material).hexdigest()
-    grouped=' '.join(digest[i:i+5] for i in range(0,40,5))
-    return jsonify({'safety_number':grouped,'fingerprint':digest})
-
-@app.route('/api/e2ee/device', methods=['POST'])
-def register_device():
-    if not user_required(): return jsonify({'error':'login_required'}),401
-    require_csrf(); data=request.get_json(silent=True) or {}; uid=session['user_id']
-    device_id=str(data.get('device_id','')).strip(); identity=str(data.get('identity_public_key','')).strip()
-    if not re.fullmatch(r'[A-Za-z0-9._:-]{8,128}', device_id) or len(identity)<40 or len(identity)>5000:
-        return jsonify({'error':'invalid_device'}),400
-    now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'); conn=get_db_connection()
-    device_name=str(data.get('device_name','Browser'))[:80]
-    existing=conn.execute('SELECT user_id FROM user_devices WHERE device_id=?',(device_id,)).fetchone()
-    if existing and int(existing['user_id']) != int(uid):
-        conn.close(); return jsonify({'error':'device_id_already_registered'}),409
-    if existing:
-        conn.execute('UPDATE user_devices SET identity_public_key=?,device_name=?,signed_prekey=?,one_time_prekey=?,last_seen_at=?,revoked=0 WHERE device_id=? AND user_id=?',
-                     (identity,device_name,data.get('signed_prekey'),data.get('one_time_prekey'),now,device_id,uid))
-    else:
-        conn.execute('INSERT INTO user_devices(user_id,device_id,device_name,identity_public_key,signed_prekey,one_time_prekey,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)',
-                     (uid,device_id,device_name,identity,data.get('signed_prekey'),data.get('one_time_prekey'),now,now))
-    conn.commit(); conn.close(); return jsonify({'ok':True,'device_id':device_id})
-
-
-@app.route('/api/e2ee/devices')
-def devices():
-    if not user_required(): return jsonify({'error':'login_required'}),401
-    conn=get_db_connection(); rows=conn.execute('SELECT device_id,device_name,created_at,last_seen_at,revoked FROM user_devices WHERE user_id=? ORDER BY last_seen_at DESC',(session['user_id'],)).fetchall(); conn.close(); return jsonify({'devices':[dict(x) for x in rows]})
-
-@app.route('/api/e2ee/backup', methods=['GET','POST','DELETE'])
-def encrypted_backup():
-    if not user_required(): return jsonify({'error':'login_required'}),401
-    uid=session['user_id']; conn=get_db_connection()
-    if request.method=='GET':
-        row=conn.execute('SELECT version,salt,iv,ciphertext,updated_at FROM encrypted_key_backups WHERE user_id=?',(uid,)).fetchone(); conn.close()
-        return jsonify(dict(row) if row else {'backup':None})
-    require_csrf()
-    if request.method=='DELETE':
-        conn.execute('DELETE FROM encrypted_key_backups WHERE user_id=?',(uid,)); conn.commit(); conn.close(); return jsonify({'ok':True})
-    data=request.get_json(silent=True) or {}; salt=str(data.get('salt','')); iv=str(data.get('iv','')); ciphertext=str(data.get('ciphertext',''))
-    if not salt or not iv or not ciphertext or len(ciphertext)>5000000: conn.close(); return jsonify({'error':'invalid_backup'}),400
-    now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'); row=conn.execute('SELECT user_id FROM encrypted_key_backups WHERE user_id=?',(uid,)).fetchone()
-    if row: conn.execute('UPDATE encrypted_key_backups SET salt=?,iv=?,ciphertext=?,updated_at=? WHERE user_id=?',(salt,iv,ciphertext,now,uid))
-    else: conn.execute('INSERT INTO encrypted_key_backups(user_id,salt,iv,ciphertext,created_at,updated_at) VALUES(?,?,?,?,?,?)',(uid,salt,iv,ciphertext,now,now))
-    conn.commit(); conn.close(); return jsonify({'ok':True})
-
-# ---------------------------------------------------------
-# Private messaging
-# ---------------------------------------------------------
+    return jsonify(dict(row) if row else {'theme':'default','wallpaper':'none','disappearing_seconds':0})
 
 @app.route("/messages")
 def messages():
@@ -3028,14 +2965,11 @@ def chat(user_id):
         ORDER BY m.id ASC
     """, (current_user_id,user_id,user_id,current_user_id,now)).fetchall()
     current_user = conn.execute("SELECT * FROM users WHERE id=?", (current_user_id,)).fetchone()
-    other_public_key = get_public_key(conn, user_id)
-    my_public_key = get_public_key(conn, current_user_id)
-    pref = conn.execute('SELECT theme,wallpaper,disappearing_seconds,e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(current_user_id,user_id)).fetchone()
-    peer_pref = conn.execute('SELECT e2ee_enabled FROM chat_preferences WHERE user_id=? AND peer_id=?',(user_id,current_user_id)).fetchone()
+    pref = conn.execute('SELECT theme,wallpaper,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?',(current_user_id,user_id)).fetchone()
     conn.commit(); conn.close()
     response = make_response(render_template("chat.html", current_user=current_user, other_user=other_user,
                            chat_messages=chat_messages, blocked=blocked,
-                           my_public_key=my_public_key, other_public_key=other_public_key, chat_pref=(dict(pref) if pref else {'theme':'default','wallpaper':'none','disappearing_seconds':0,'e2ee_enabled':0}), peer_e2ee_enabled=bool(peer_pref and peer_pref['e2ee_enabled'])))
+                           chat_pref=(dict(pref) if pref else {'theme':'default','wallpaper':'none','disappearing_seconds':0})))
     # Chat pages must not be served from a stale browser cache. This is especially
     # important after removing the legacy voice/video-call JavaScript.
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -3080,51 +3014,48 @@ def send_message():
         return redirect(url_for("user_login"))
     require_csrf(); sender_id=session["user_id"]
     receiver_id=request.form.get("receiver_id",type=int)
-    ciphertext=request.form.get("ciphertext","").strip()
-    iv=request.form.get("iv","").strip()
     message_text=request.form.get("message","").strip()
     reply_to_id=request.form.get("reply_to_id",type=int)
     if not receiver_id or receiver_id==sender_id:
         return jsonify({"error":"Invalid recipient."}),400
+    if not message_text:
+        return jsonify({"error":"Message cannot be empty."}),400
+    if len(message_text)>5000:
+        return jsonify({"error":"Message is too long."}),400
     conn=get_db_connection()
     recipient=conn.execute("SELECT id FROM users WHERE id=?",(receiver_id,)).fetchone()
-    if not recipient: conn.close(); return jsonify({"error":"Recipient not found."}),404
-    if users_are_blocked(conn,sender_id,receiver_id): conn.close(); return jsonify({"error":"You cannot message this user because one of you has blocked the other."}),403
-    if reply_to_id:
-        if not conn.execute("SELECT id FROM messages WHERE id=? AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?))",(reply_to_id,sender_id,receiver_id,receiver_id,sender_id)).fetchone():
-            reply_to_id=None
-    pref=conn.execute("SELECT e2ee_enabled,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",(sender_id,receiver_id)).fetchone()
-    secure=bool(pref and pref["e2ee_enabled"])
-    if secure:
-        if not ciphertext or not iv:
-            conn.close(); return jsonify({"error":"Secure chat is enabled. Your browser could not encrypt this message."}),400
-        if len(ciphertext)>20000 or len(iv)>100:
-            conn.close(); return jsonify({"error":"Encrypted payload is too large."}),400
-        stored_message="[Encrypted message]"; encryption_version=1
-    else:
-        if not message_text:
-            conn.close(); return jsonify({"error":"Message cannot be empty."}),400
-        if len(message_text)>5000:
-            conn.close(); return jsonify({"error":"Message is too long."}),400
-        ciphertext=None; iv=None; stored_message=message_text; encryption_version=0
+    if not recipient:
+        conn.close(); return jsonify({"error":"Recipient not found."}),404
+    if users_are_blocked(conn,sender_id,receiver_id):
+        conn.close(); return jsonify({"error":"You cannot message this user because one of you has blocked the other."}),403
+    if reply_to_id and not conn.execute(
+        "SELECT id FROM messages WHERE id=? AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?))",
+        (reply_to_id,sender_id,receiver_id,receiver_id,sender_id)
+    ).fetchone():
+        reply_to_id=None
+    pref=conn.execute(
+        "SELECT disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",
+        (sender_id,receiver_id)
+    ).fetchone()
     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     disappear=int(pref["disappearing_seconds"] if pref else 0)
     expires_at=None
     if disappear>0:
         from datetime import timedelta
         expires_at=(datetime.now()+timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
-    cursor=conn.execute("""INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at,reply_to_id,edited_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL,?,NULL)""",
-                        (sender_id,receiver_id,stored_message,ciphertext,iv,encryption_version,created_at,expires_at,reply_to_id))
+    cursor=conn.execute(
+        """INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at,reply_to_id,edited_at)
+           VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL,?,NULL)""",
+        (sender_id,receiver_id,message_text,None,None,0,created_at,expires_at,reply_to_id)
+    )
     message_id=cursor.lastrowid
-    # Bridge direct social messages into the platform conversation inbox so
-    # Social and Workspace share the same direct-message history.
     try:
-        direct = conn.execute("""SELECT c.id FROM conversations c
+        direct=conn.execute("""SELECT c.id FROM conversations c
             JOIN conversation_members m1 ON m1.conversation_id=c.id AND m1.user_id=?
             JOIN conversation_members m2 ON m2.conversation_id=c.id AND m2.user_id=?
             WHERE COALESCE(c.context_type,'')='' AND
                   (SELECT COUNT(*) FROM conversation_members mx WHERE mx.conversation_id=c.id)=2
-            ORDER BY c.id DESC LIMIT 1""", (sender_id, receiver_id)).fetchone()
+            ORDER BY c.id DESC LIMIT 1""",(sender_id,receiver_id)).fetchone()
         if not direct:
             cc=conn.execute("INSERT INTO conversations(subject,context_type,context_id,created_by,created_at) VALUES(?,?,?,?,?)",("Direct message","",None,sender_id,created_at))
             cid=cc.lastrowid
@@ -3132,16 +3063,13 @@ def send_message():
             conn.execute("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at) VALUES(?,?,?,?)",(cid,receiver_id,"member",created_at))
         else:
             cid=direct[0]
-        conn.execute("INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",(cid,sender_id,stored_message,"",created_at))
+        conn.execute("INSERT INTO conversation_messages(conversation_id,sender_id,body,attachment_url,created_at) VALUES(?,?,?,?,?)",(cid,sender_id,message_text,"",created_at))
     except Exception:
-        # Keep the legacy social message working even if the compatibility
-        # bridge is unavailable on an older database.
         pass
     conn.commit(); conn.close()
     return jsonify({"ok":True,"message":{"id":message_id,"sender_id":sender_id,"receiver_id":receiver_id,
-        "message":stored_message,"ciphertext":ciphertext,"iv":iv,"encryption_version":encryption_version,
+        "message":message_text,"ciphertext":None,"iv":None,"encryption_version":0,
         "created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None,"reply_to_id":reply_to_id,"edited_at":None}})
-
 
 @app.route("/messages/<int:message_id>/edit", methods=["POST"])
 def edit_message(message_id):
@@ -4657,12 +4585,7 @@ def delete_gallery_image(image_id):
     # Delete physical file.
     try:
 
-        os.remove(
-            os.path.join(
-                app.config["UPLOAD_FOLDER"],
-                image_path
-            )
-        )
+        delete_public_upload(image_path)
 
     except OSError:
         pass
