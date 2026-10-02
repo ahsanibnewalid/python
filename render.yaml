@@ -3,7 +3,7 @@ services:
   - type: web
     name: university-connect
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     buildCommand: pip install -r requirements.txt
     startCommand: python production_admin_runtime.py
     healthCheckPath: /healthz
@@ -51,4 +51,4 @@ databases:
   - name: university-connect-db
     databaseName: university_connect
     user: university_connect
-    plan: free
+    plan: 0.1c-256mb
