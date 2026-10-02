@@ -1,54 +1,20 @@
-# University Connect Render blueprint: persistent PostgreSQL + stateless web service.
 services:
   - type: web
-    name: university-connect
+    name: university-management-system
     runtime: python
-    plan: 0.5c-512mb
     buildCommand: pip install -r requirements.txt
-    startCommand: python production_admin_runtime.py
+    startCommand: gunicorn app:app --workers 2 --threads 4 --timeout 120
     healthCheckPath: /healthz
     envVars:
-      - key: APP_ENV
-        value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: university-connect-db
+          name: university-management-db
           property: connectionString
-      - key: FLASK_SECRET_KEY
+      - key: SECRET_KEY
         generateValue: true
-      - key: ADMIN_USER
-        value: admin
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: ADMIN_BOOTSTRAP_TOKEN
-        sync: false
-      - key: TRUST_PROXY
-        value: "1"
-      - key: REQUIRE_HTTPS
-        value: "1"
       - key: COOKIE_SECURE
-        value: "1"
-      - key: BILLING_ENABLED
-        value: "false"
-      - key: BILLING_PROVIDER
-        value: none
-      - key: MEDIA_STORAGE
-        value: s3
-      - key: MEDIA_S3_BUCKET
-        sync: false
-      - key: MEDIA_S3_ENDPOINT
-        sync: false
-      - key: MEDIA_S3_REGION
-        value: auto
-      - key: MEDIA_S3_ACCESS_KEY
-        sync: false
-      - key: MEDIA_S3_SECRET_KEY
-        sync: false
-      - key: MEDIA_S3_PREFIX
-        value: university-connect
-
+        value: "true"
 databases:
-  - name: university-connect-db
-    databaseName: university_connect
-    user: university_connect
-    plan: 0.1c-256mb
+  - name: university-management-db
+    databaseName: university_management
+    user: university_management_user
