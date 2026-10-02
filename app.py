@@ -2034,6 +2034,13 @@ def serialize_posts(conn, posts, user_id):
         ).fetchall()
         for row in comment_rows:
             comment_map.setdefault(int(row["post_id"]),[]).append(dict(row))
+    saved_ids=set()
+    if posts:
+        saved_rows=conn.execute(
+            f"SELECT post_id FROM saved_posts WHERE user_id=? AND post_id IN ({placeholders})",
+            (user_id, *post_ids)
+        ).fetchall()
+        saved_ids={int(r["post_id"]) for r in saved_rows}
     for p in posts:
         output.append({
             "id": p["id"], "user_id": p["user_id"], "name": p["name"], "username": p["username"], "photo": p["photo"],
@@ -2042,6 +2049,7 @@ def serialize_posts(conn, posts, user_id):
             "media_url": (url_for("private_post_media", token=p["media_token"]) if p["original_name"] else None),
             "created_at": p["created_at"], "like_count": p["like_count"],
             "comment_count": p["comment_count"], "liked_by_me": bool(p["liked_by_me"]),
+            "saved_by_me": int(p["id"]) in saved_ids,
             "is_owner": int(p["user_id"]) == int(user_id),
             "comments":comment_map.get(int(p["id"]),[])
         })
