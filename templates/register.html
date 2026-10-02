@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Create Account · {{ site_name }}</title>
+<title>Create account · University Management System</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
 <script src="{{ url_for('static', filename='theme.js') }}"></script>
 <style>
@@ -13,8 +13,8 @@
 <body>
 <div class="wrap">
 <main class="card">
-  <h1>Join {{ site_name }}</h1>
-  <div class="sub">Create a personal account, or create the official page for a university, institute, company, IT firm, hospital or other organization. Organization pages are visible to everyone, while membership is verified through administrator approval.</div>
+  <h1>Create your management account</h1>
+  <div class="sub">Create one account to access the University Management System. After signing up, you will enter the workspace directly, where you can create an institution or use an invitation from your institution administrator. Choose the organization option only if you are registering as its founder.</div>
 
   {% with messages=get_flashed_messages(with_categories=true) %}
     {% for category,message in messages %}<div class="flash">{{ message }}</div>{% endfor %}
@@ -23,11 +23,11 @@
   <div class="mode" role="radiogroup" aria-label="Account type">
     <label id="individualMode" class="{{ '' if account_mode=='organization' else 'active' }}">
       <input type="radio" name="mode_ui" value="individual" {% if account_mode!='organization' %}checked{% endif %}>
-      <strong>👤 Personal account</strong><small>Student, creator, teacher, doctor, employee, official or individual user.</small>
+      <strong>👤 Personal account</strong><small>Student, teacher, staff member or institution manager joining an existing institution.</small>
     </label>
     <label id="organizationMode" class="{{ 'active' if account_mode=='organization' else '' }}">
       <input type="radio" name="mode_ui" value="organization" {% if account_mode=='organization' %}checked{% endif %}>
-      <strong>🏢 Organization / Institution</strong><small>Create a public page and become its founder/owner.</small>
+      <strong>🏛 Institution founder</strong><small>Create an institution account and submit proof for verification.</small>
     </label>
   </div>
 
@@ -46,10 +46,10 @@
     </div>
 
     <section id="organizationFields" class="section {% if account_mode!='organization' %}hidden{% endif %}">
-      <h2>Official page setup</h2>
-      <div class="hint">This creates a public page automatically. Your page will be marked <b>Pending Verification</b> until the platform reviews the evidence you submit.</div>
+      <h2>Institution founder setup</h2>
+      <div class="hint">This registers your institution and owner account. Institution ownership remains pending verification until an authorized reviewer checks your proof.</div>
       <div class="grid">
-        <div class="full"><label class="field">University / company / institute / organization name *</label><input name="organization_name" id="organizationName"></div>
+        <div class="full"><label class="field">Institution name *</label><input name="organization_name" id="organizationName"></div>
         <div><label class="field">Type *</label><select name="organization_type" id="organizationType">
           <option value="university">University</option><option value="college">College</option><option value="school">School</option><option value="institute">Institute</option><option value="coaching_center">Coaching Center</option><option value="training_center">Training Center</option><option value="company">Company</option><option value="it_firm">IT Firm</option><option value="office">Office</option><option value="hospital">Hospital</option><option value="clinic">Clinic</option><option value="ngo">NGO</option><option value="government">Government Office</option><option value="other">Other</option>
         </select></div>
@@ -61,7 +61,7 @@
       <div class="verify-note">🔐 Trust rule: members will later have to prove that they actually study or work here before administrators can approve their requested role. Proof files are kept private and are only available to authorized reviewers.</div>
     </section>
 
-    <button class="btn" type="submit">Create Account</button>
+    <button class="btn" type="submit">Create account and continue</button>
   </form>
   <div class="links"><a href="{{ url_for('user_login') }}">Already have an account? Log in</a></div>
 </main>

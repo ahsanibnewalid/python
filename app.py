@@ -1506,11 +1506,17 @@ def register():
         finally:
             conn.close()
 
+        # First-time sign-up ends in the management workspace, not back at login.
+        # The password is already hashed above; keep the same session contract as login.
+        session["user_logged_in"] = True
+        session["user_id"] = new_user_id
+        session.permanent = True
+        session.modified = True
         if public_url:
-            flash("Account created. Your organization page is live but marked Pending Verification until the platform reviews your proof.", "success")
+            flash("Your account is ready. Your institution/organization is pending verification; you can continue to the management workspace.", "success")
         else:
-            flash("Account created successfully. You can now log in with Gmail or phone number.", "success")
-        return redirect(url_for("user_login"))
+            flash("Account created successfully. Welcome to the University Management System.", "success")
+        return redirect(url_for("landing"))
 
     return render_template("register.html", account_mode=account_mode)
 
