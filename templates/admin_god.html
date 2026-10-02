@@ -21,7 +21,8 @@
       <button class="primary" type="submit" {% if not mobile_builder_configured %}disabled{% endif %}>Build installable APK</button>
     </form>
     <a id="apk-run" class="primary" href="{% if mobile_build and mobile_build.run_id %}https://github.com/ahsanibnewalid/python/actions/runs/{{ mobile_build.run_id }}{% else %}#{% endif %}" target="_blank" rel="noopener" {% if not mobile_build or not mobile_build.run_id %}style="display:none"{% endif %}>Open build</a>
-    <a id="apk-download" class="primary" href="{% if mobile_build and mobile_build.artifact_id %}{{ url_for('admin_god_mobile_download',build_id=mobile_build.id) }}{% else %}#{% endif %}" {% if not mobile_build or not mobile_build.artifact_id %}style="display:none"{% endif %}>Download APK</a>
+    <a id="apk-download" class="primary" href="{% if mobile_build and mobile_build.artifact_id %}{{ url_for('admin_god_mobile_download',build_id=mobile_build.id) }}{% else %}{{ url_for('admin_god_mobile_download_latest') }}{% endif %}">Download APK</a>
+    <a class="primary" href="{{ url_for('admin_god_mobile_download_latest') }}">Download latest successful APK</a>
   </div>
   <div id="apk-error" class="muted" style="margin-top:10px">{% if mobile_build and mobile_build.error %}{{ mobile_build.error }}{% endif %}</div>
 </section>
