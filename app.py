@@ -669,6 +669,18 @@ def init_db():
     """)
 
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS saved_posts (
+            user_id INTEGER NOT NULL,
+            post_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, post_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_posts_user_created ON saved_posts(user_id, created_at)")
+    
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS post_likes (
             post_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -1746,6 +1758,146 @@ def user_home():
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+@app.route("/my-dashboard")
+def my_dashboard():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    uid = session["user_id"]
+    conn = get_db_connection()
+    profile = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not profile:
+        conn.close()
+        return redirect(url_for("user_login"))
+
+    counts = {
+        "posts": conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=?", (uid,)).fetchone()[0],
+        "reels": conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=? AND post_type='reel'", (uid,)).fetchone()[0],
+        "stories": conn.execute("SELECT COUNT(*) FROM stories WHERE user_id=?", (uid,)).fetchone()[0],
+        "saved": conn.execute("SELECT COUNT(*) FROM saved_posts WHERE user_id=?", (uid,)).fetchone()[0],
+        "conversations": conn.execute(
+            "SELECT COUNT(*) FROM (SELECT CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id FROM messages WHERE sender_id=? OR receiver_id=? GROUP BY other_id)",
+            (uid, uid, uid)
+        ).fetchone()[0],
+        "unread": conn.execute("SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0", (uid,)).fetchone()[0],
+    }
+    try:
+        counts["notifications"] = conn.execute(
+            "SELECT COUNT(*) FROM platform_notifications WHERE user_id=? AND is_read=0", (uid,)
+        ).fetchone()[0]
+    except Exception:
+        counts["notifications"] = 0
+
+    profile_fields = ["photo", "bio", "headline", "occupation", "company", "education", "skills", "experience", "projects", "certifications"]
+    filled = sum(1 for key in profile_fields if str(profile[key] or "").strip()) if profile else 0
+    profile_completion = round((filled / len(profile_fields)) * 100) if profile_fields else 100
+
+    saved_rows = conn.execute(
+        """SELECT p.id,p.caption,p.post_type,p.created_at,p.media_type,p.media_token,p.original_name,
+                  u.id AS author_id,u.name AS author_name,u.username AS author_username,u.photo AS author_photo
+           FROM saved_posts sp
+           JOIN posts p ON p.id=sp.post_id
+           JOIN users u ON u.id=p.user_id
+           WHERE sp.user_id=?
+           ORDER BY sp.created_at DESC LIMIT 8""",
+        (uid,)
+    ).fetchall()
+    saved_items = []
+    for row in saved_rows:
+        item = dict(row)
+        item["media_url"] = private_media_url(item["media_token"], item["original_name"], uid) if item["media_token"] else None
+        saved_items.append(item)
+
+    activity_rows = []
+    try:
+        activity_rows = conn.execute(
+            """SELECT event_type,target_type,target_id,duration_seconds,created_at
+               FROM usage_events
+               WHERE user_id=?
+               ORDER BY id DESC LIMIT 12""",
+            (uid,)
+        ).fetchall()
+    except Exception:
+        activity_rows = []
+
+    recent_posts = conn.execute(
+        """SELECT p.id,p.caption,p.post_type,p.created_at,p.media_type,p.media_token,p.original_name
+           FROM posts p WHERE p.user_id=? ORDER BY p.id DESC LIMIT 6""",
+        (uid,)
+    ).fetchall()
+    recent_post_items=[]
+    for row in recent_posts:
+        item=dict(row)
+        item["media_url"]=private_media_url(item["media_token"],item["original_name"],uid) if item["media_token"] else None
+        recent_post_items.append(item)
+
+    workspace_links = [
+        ("Platform workspace", url_for("v2.ui_dashboard"), "Your institutions, organizations, career and platform tools"),
+        ("Messages", url_for("messages"), "Open your conversations"),
+        ("Notifications", url_for("notification_center"), "See platform and activity alerts"),
+        ("Profile & CV", url_for("my_profile"), "Build your public professional profile"),
+        ("Reels", url_for("reels_page"), "Watch and publish short videos"),
+        ("Network", url_for("network_page"), "Find people in your community"),
+    ]
+    conn.close()
+    return render_template(
+        "my_dashboard.html",
+        current_user=profile,
+        counts=counts,
+        profile_completion=profile_completion,
+        saved_items=saved_items,
+        activity_rows=activity_rows,
+        recent_posts=recent_post_items,
+        workspace_links=workspace_links,
+        csrf=csrf_token(),
+        site_name=get_site_name(),
+    )
+
+
+@app.route("/saved")
+def saved_posts_page():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    uid=session["user_id"]
+    conn=get_db_connection()
+    rows=conn.execute(
+        """SELECT p.*,u.name AS author_name,u.username AS author_username,u.photo AS author_photo
+           FROM saved_posts sp JOIN posts p ON p.id=sp.post_id JOIN users u ON u.id=p.user_id
+           WHERE sp.user_id=? ORDER BY sp.created_at DESC""",
+        (uid,)
+    ).fetchall()
+    items=[]
+    for row in rows:
+        item=dict(row)
+        item["media_url"]=private_media_url(item["media_token"],item["original_name"],uid) if item["media_token"] else None
+        items.append(item)
+    conn.close()
+    return render_template("saved_posts.html", current_user=profile if False else None, items=items, csrf=csrf_token(), site_name=get_site_name())
+
+
+@app.route("/api/posts/<int:post_id>/save", methods=["POST"])
+def toggle_saved_post(post_id):
+    if not user_required():
+        return jsonify({"error":"login_required"}),401
+    require_csrf()
+    uid=session["user_id"]
+    conn=get_db_connection()
+    post=conn.execute("SELECT id FROM posts WHERE id=?",(post_id,)).fetchone()
+    if not post:
+        conn.close()
+        return jsonify({"error":"post_not_found"}),404
+    exists=conn.execute("SELECT 1 FROM saved_posts WHERE user_id=? AND post_id=?",(uid,post_id)).fetchone()
+    if exists:
+        conn.execute("DELETE FROM saved_posts WHERE user_id=? AND post_id=?",(uid,post_id))
+        saved=False
+    else:
+        conn.execute("INSERT INTO saved_posts(user_id,post_id,created_at) VALUES(?,?,?)",(uid,post_id,datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+        saved=True
+    conn.commit()
+    total=conn.execute("SELECT COUNT(*) FROM saved_posts WHERE user_id=?",(uid,)).fetchone()[0]
+    conn.close()
+    return jsonify({"saved":saved,"saved_count":total})
 
 
 @app.route("/network")
