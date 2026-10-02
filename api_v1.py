@@ -707,7 +707,7 @@ def conversations():
             "username": user["username"] if user else "",
             "photo_url": public_photo_url(user["photo"]) if user else None,
             "last_message": (last["message"] if last else ""),
-            "encryption_version": int(last["encryption_version"]) if last else 0,
+            "encryption_version": 0,
             "last_created_at": (last["created_at"] if last else ""),
             "unread_count": int(unread or 0),
         })
@@ -750,70 +750,30 @@ def messages(other_user_id):
 @bp.post("/messages/<int:receiver_id>")
 @mobile_auth
 def send_message(receiver_id):
-    uid = g.mobile_user_id
-    if receiver_id == uid:
-        return json_error("invalid_recipient", 400)
-    data = request.get_json(silent=True) or {}
-    form = request.form if request.form else {}
-    message_text = str(form.get("message", form.get("body", ""))).strip()
-    if not message_text:
-        message_text = str(data.get("message", data.get("body", ""))).strip()
-    ciphertext = str(data.get("ciphertext", form.get("ciphertext", ""))).strip()
-    iv = str(data.get("iv", form.get("iv", ""))).strip()
-
-    conn = bp.app_module.get_db_connection()
-    if not conn.execute("SELECT id FROM users WHERE id=?", (receiver_id,)).fetchone():
-        conn.close()
-        return json_error("recipient_not_found", 404)
-    if bp.app_module.users_are_blocked(conn, uid, receiver_id):
-        conn.close()
-        return json_error("blocked", 403)
-    pref = conn.execute(
-        "SELECT e2ee_enabled,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",
-        (uid, receiver_id),
-    ).fetchone()
-    secure = bool(pref and pref["e2ee_enabled"])
-    if secure:
-        if not ciphertext or not iv:
-            conn.close()
-            return json_error("secure_chat_requires_ciphertext", 400)
-        stored = "[Encrypted message]"
-        enc_ver = 1
-        ciphertext = ciphertext[:20000]
-        iv = iv[:100]
-    else:
-        if not message_text:
-            conn.close()
-            return json_error("message_required", 400)
-        if len(message_text) > 5000:
-            conn.close()
-            return json_error("message_too_long", 400)
-        stored = message_text
-        enc_ver = 0
-        ciphertext = None
-        iv = None
-    created = db_now()
-    disappear = int(pref["disappearing_seconds"] if pref else 0)
-    expires = None
-    if disappear > 0:
-        expires = (now_utc() + timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
-    cursor = conn.execute(
+    uid=g.mobile_user_id
+    if receiver_id==uid: return json_error("invalid_recipient",400)
+    data=request.get_json(silent=True) or {}
+    form=request.form if request.form else {}
+    message_text=str(form.get("message",form.get("body",""))).strip()
+    if not message_text: message_text=str(data.get("message",data.get("body",""))).strip()
+    if not message_text: return json_error("message_required",400)
+    if len(message_text)>5000: return json_error("message_too_long",400)
+    conn=bp.app_module.get_db_connection()
+    if not conn.execute("SELECT id FROM users WHERE id=?",(receiver_id,)).fetchone():
+        conn.close(); return json_error("recipient_not_found",404)
+    if bp.app_module.users_are_blocked(conn,uid,receiver_id):
+        conn.close(); return json_error("blocked",403)
+    pref=conn.execute("SELECT disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",(uid,receiver_id)).fetchone()
+    created=db_now(); disappear=int(pref["disappearing_seconds"] if pref else 0); expires=None
+    if disappear>0: expires=(now_utc()+timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor=conn.execute(
         "INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL)",
-        (uid, receiver_id, stored, ciphertext, iv, enc_ver, created, expires),
+        (uid,receiver_id,message_text,None,None,0,created,expires)
     )
-    mid = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return jsonify({
-        "ok": True,
-        "message": {
-            "id": mid, "sender_id": uid, "receiver_id": receiver_id, "message": stored,
-            "ciphertext": ciphertext, "iv": iv, "encryption_version": enc_ver,
-            "created_at": created, "expires_at": expires, "is_read": 0, "delivered_at": None,
-        },
-    }), 201
-
-
+    mid=cursor.lastrowid; conn.commit(); conn.close()
+    return jsonify({"ok":True,"message":{"id":mid,"sender_id":uid,"receiver_id":receiver_id,"message":message_text,
+        "ciphertext":None,"iv":None,"encryption_version":0,"created_at":created,"expires_at":expires,
+        "is_read":0,"delivered_at":None,"read_at":None}}),201
 
 @bp.get("/search")
 @mobile_auth
