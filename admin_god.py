@@ -390,20 +390,12 @@ def install(app, get_db_connection, init_db):
             "download_url": url_for("admin_god_mobile_download", build_id=row["id"]) if row["artifact_id"] else None,
         })
 
-    @app.route("/admin/god/mobile/download/<int:build_id>", methods=["GET"])
-    @owner_required
-    def admin_god_mobile_download(build_id):
-        row = mobile_build_row()
-        if not row or int(row["id"]) != int(build_id):
-            return abort(404)
-        row = refresh_mobile_build(row)
-        if row["status"] != "success" or not row["artifact_id"]:
-            return abort(404, description="A completed APK artifact is not available yet.")
+    def download_github_apk(artifact_id, filename):
         token, repo, _ = github_config()
         if not token:
             return abort(503, description="APK builder is not configured.")
         req = urllib.request.Request(
-            "https://api.github.com/repos/%s/actions/artifacts/%s/zip" % (repo, row["artifact_id"]),
+            "https://api.github.com/repos/%s/actions/artifacts/%s/zip" % (repo, artifact_id),
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": "Bearer " + token,
@@ -417,17 +409,66 @@ def install(app, get_db_connection, init_db):
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 apk_names = [n for n in archive.namelist() if n.lower().endswith(".apk")]
                 if not apk_names:
-                    return abort(502, description="The build artifact did not contain an APK.")
+                    return abort(502, description="The GitHub artifact does not contain an APK.")
                 apk = archive.read(apk_names[0])
         except Exception as exc:
             app.logger.exception("APK artifact download failed")
-            return abort(502, description="Could not retrieve the APK artifact: %s" % str(exc)[:300])
+            return abort(502, description="Could not retrieve the APK from GitHub: %s" % str(exc)[:300])
         return send_file(
             io.BytesIO(apk),
             mimetype="application/vnd.android.package-archive",
             as_attachment=True,
-            download_name="university-connect-debug-%s.apk" % row["id"],
+            download_name=filename,
         )
+
+    @app.route("/admin/god/mobile/download/<int:build_id>", methods=["GET"])
+    @owner_required
+    def admin_god_mobile_download(build_id):
+        row = mobile_build_row()
+        if not row or int(row["id"]) != int(build_id):
+            return abort(404)
+        row = refresh_mobile_build(row)
+        if row["status"] != "success" or not row["artifact_id"]:
+            return abort(404, description="A completed APK artifact is not available yet.")
+        return download_github_apk(
+            row["artifact_id"],
+            "university-connect-debug-%s.apk" % row["id"],
+        )
+
+    @app.route("/admin/god/mobile/download-latest", methods=["GET"])
+    @owner_required
+    def admin_god_mobile_download_latest():
+        token, repo, workflow = github_config()
+        if not token:
+            return abort(503, description="APK builder is not configured.")
+        try:
+            _, data = github_json(
+                "GET",
+                "/repos/%s/actions/workflows/%s/runs?branch=main&status=success&per_page=20"
+                % (repo, urllib.parse.quote(workflow, safe="")),
+            )
+            runs = data.get("workflow_runs") or []
+            for run in runs:
+                run_id = run.get("id")
+                if not run_id:
+                    continue
+                _, artifacts_data = github_json(
+                    "GET",
+                    "/repos/%s/actions/runs/%s/artifacts?per_page=50" % (repo, run_id),
+                )
+                for artifact in artifacts_data.get("artifacts") or []:
+                    name = (artifact.get("name") or "").lower()
+                    if artifact.get("expired"):
+                        continue
+                    if "apk" in name or name == "university-connect-android-debug":
+                        return download_github_apk(
+                            artifact.get("id"),
+                            "university-connect-latest.apk",
+                        )
+            return abort(404, description="No non-expired successful APK artifact was found. Build the APK first.")
+        except Exception as exc:
+            app.logger.exception("Latest APK lookup failed")
+            return abort(502, description="Could not find the latest APK on GitHub: %s" % str(exc)[:300])
 
     @app.route("/admin/god/space/<int:space_id>/verify", methods=["POST"])
     @owner_required
