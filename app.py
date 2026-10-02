@@ -6,7 +6,7 @@ from flask import Flask,abort,flash,g,redirect,render_template,request,session,u
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import UniqueConstraint
 from werkzeug.security import generate_password_hash,check_password_hash
-app=Flask(__name__); app.config["SECRET_KEY"]=os.getenv("SECRET_KEY","dev-only-change-this-secret")
+app=Flask(__name__); app.config["SECRET_KEY"]=os.getenv("SECRET_KEY") or "local-development-only-change-me"
 uri=os.getenv("DATABASE_URL","sqlite:///university_management.db")
 if uri.startswith("postgres://"): uri=uri.replace("postgres://","postgresql+psycopg://",1)
 elif uri.startswith("postgresql://") and "+psycopg" not in uri: uri=uri.replace("postgresql://","postgresql+psycopg://",1)
@@ -14,18 +14,25 @@ app.config.update(SQLALCHEMY_DATABASE_URI=uri,SQLALCHEMY_TRACK_MODIFICATIONS=Fal
 db=SQLAlchemy(app); MANAGERS={"institution_owner","institution_admin","principal"}; ROLES=MANAGERS|{"teacher","staff","student"}
 def now(): return datetime.now(timezone.utc)
 class User(db.Model):
+ __tablename__="ums_user"
  id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(120),nullable=False); email=db.Column(db.String(254),unique=True,nullable=False,index=True); password=db.Column(db.String(255),nullable=False)
 class Institution(db.Model):
+ __tablename__="ums_institution"
  id=db.Column(db.Integer,primary_key=True); name=db.Column(db.String(180),nullable=False); kind=db.Column(db.String(40),nullable=False,default="university"); address=db.Column(db.String(250),default="")
 class Membership(db.Model):
- id=db.Column(db.Integer,primary_key=True); institution_id=db.Column(db.Integer,db.ForeignKey("institution.id",ondelete="CASCADE"),nullable=False); user_id=db.Column(db.Integer,db.ForeignKey("user.id",ondelete="CASCADE"),nullable=False); role=db.Column(db.String(30),nullable=False,default="student"); institution=db.relationship("Institution"); user=db.relationship("User"); __table_args__=(UniqueConstraint("institution_id","user_id",name="uq_member"),)
+ __tablename__="ums_membership"
+ id=db.Column(db.Integer,primary_key=True); institution_id=db.Column(db.Integer,db.ForeignKey("ums_institution.id",ondelete="CASCADE"),nullable=False); user_id=db.Column(db.Integer,db.ForeignKey("ums_user.id",ondelete="CASCADE"),nullable=False); role=db.Column(db.String(30),nullable=False,default="student"); institution=db.relationship("Institution"); user=db.relationship("User"); __table_args__=(UniqueConstraint("institution_id","user_id",name="uq_member"),)
 class Department(db.Model):
+ __tablename__="ums_department"
  id=db.Column(db.Integer,primary_key=True); institution_id=db.Column(db.Integer,db.ForeignKey("institution.id",ondelete="CASCADE"),nullable=False); name=db.Column(db.String(150),nullable=False); code=db.Column(db.String(30),default=""); institution=db.relationship("Institution"); courses=db.relationship("Course",backref="department",cascade="all, delete-orphan"); __table_args__=(UniqueConstraint("institution_id","name",name="uq_department"),)
 class Course(db.Model):
- id=db.Column(db.Integer,primary_key=True); department_id=db.Column(db.Integer,db.ForeignKey("department.id",ondelete="CASCADE"),nullable=False); code=db.Column(db.String(30),nullable=False); title=db.Column(db.String(180),nullable=False); credits=db.Column(db.Integer,default=3); description=db.Column(db.Text,default=""); __table_args__=(UniqueConstraint("department_id","code",name="uq_course"),)
+ __tablename__="ums_course"
+ id=db.Column(db.Integer,primary_key=True); department_id=db.Column(db.Integer,db.ForeignKey("ums_department.id",ondelete="CASCADE"),nullable=False); code=db.Column(db.String(30),nullable=False); title=db.Column(db.String(180),nullable=False); credits=db.Column(db.Integer,default=3); description=db.Column(db.Text,default=""); __table_args__=(UniqueConstraint("department_id","code",name="uq_course"),)
 class Enrollment(db.Model):
- id=db.Column(db.Integer,primary_key=True); course_id=db.Column(db.Integer,db.ForeignKey("course.id",ondelete="CASCADE"),nullable=False); user_id=db.Column(db.Integer,db.ForeignKey("user.id",ondelete="CASCADE"),nullable=False); course=db.relationship("Course"); __table_args__=(UniqueConstraint("course_id","user_id",name="uq_enrollment"),)
+ __tablename__="ums_enrollment"
+ id=db.Column(db.Integer,primary_key=True); course_id=db.Column(db.Integer,db.ForeignKey("ums_course.id",ondelete="CASCADE"),nullable=False); user_id=db.Column(db.Integer,db.ForeignKey("user.id",ondelete="CASCADE"),nullable=False); course=db.relationship("Course"); __table_args__=(UniqueConstraint("course_id","user_id",name="uq_enrollment"),)
 class Notice(db.Model):
+ __tablename__="ums_notice"
  id=db.Column(db.Integer,primary_key=True); institution_id=db.Column(db.Integer,db.ForeignKey("institution.id",ondelete="CASCADE"),nullable=False); author_id=db.Column(db.Integer,db.ForeignKey("user.id"),nullable=False); title=db.Column(db.String(180),nullable=False); body=db.Column(db.Text,nullable=False); created_at=db.Column(db.DateTime(timezone=True),default=now); author=db.relationship("User")
 @app.before_request
 def context():
