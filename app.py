@@ -85,7 +85,8 @@ POST_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 POST_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "m4v"}
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024
+MAX_UPLOAD_MB = max(1, int(os.environ.get("MAX_UPLOAD_MB", "512")))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # Browser sessions must be secure in production. This is especially
@@ -4545,7 +4546,7 @@ def not_found(error):
 
 @app.errorhandler(413)
 def too_large(error):
-    message = "The uploaded file is larger than the allowed 60 MB limit."
+    message = f"The uploaded file is larger than the allowed {MAX_UPLOAD_MB} MB limit."
     if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.accept_mimetypes.best == "application/json":
         return jsonify(error=message), 413
     return render_template("error.html", code=413, title="File too large", message=message), 413
@@ -4562,6 +4563,9 @@ def server_error(error):
 # ---------------------------------------------------------
 # University Connect education + career platform layer
 # ---------------------------------------------------------
+from api_v1 import install as install_api_v1
+install_api_v1(__import__(__name__))
+
 install_v2_core(app, get_db_connection, require_csrf)
 
 # ---------------------------------------------------------

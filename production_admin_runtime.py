@@ -83,8 +83,8 @@ def install_upload_compatibility(app_module):
     browser-reported type. This is especially important for Android/iOS media
     and for files uploaded unchanged after the media editor was removed.
 
-    The application still enforces the extension allowlist and Flask's 60 MB
-    request limit before this function is reached.
+    The application still enforces the extension allowlist and Flask's configurable
+    MAX_UPLOAD_MB request limit (512 MB by default) before this function is reached.
     """
     def compatible_signature(_file_storage, media_type):
         return media_type in {"image", "video"}
