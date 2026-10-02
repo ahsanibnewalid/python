@@ -26,6 +26,28 @@ class User(db.Model):
  name=db.Column(db.String(120),nullable=False)
  email=db.Column(db.String(254),unique=True,nullable=False,index=True)
  password=db.Column(db.String(255),nullable=False)
+ created_at=db.Column(db.DateTime(timezone=True),default=now)
+ profile=db.relationship("UserProfile",backref="user",uselist=False,cascade="all, delete-orphan")
+
+class UserProfile(db.Model):
+ __tablename__="ums_user_profile"
+ id=db.Column(db.Integer,primary_key=True)
+ user_id=db.Column(db.Integer,db.ForeignKey("ums_user.id",ondelete="CASCADE"),nullable=False,unique=True)
+ username=db.Column(db.String(60),unique=True,index=True)
+ bio=db.Column(db.Text,default="")
+ phone=db.Column(db.String(50),default="")
+ location=db.Column(db.String(180),default="")
+ date_of_birth=db.Column(db.Date,nullable=True)
+ gender=db.Column(db.String(30),default="")
+ institution_text=db.Column(db.String(180),default="")
+ department=db.Column(db.String(150),default="")
+ program=db.Column(db.String(180),default="")
+ student_id=db.Column(db.String(100),default="")
+ profile_photo_url=db.Column(db.String(500),default="")
+ website=db.Column(db.String(500),default="")
+ facebook_url=db.Column(db.String(500),default="")
+ linkedin_url=db.Column(db.String(500),default="")
+ is_public=db.Column(db.Boolean,default=True,nullable=False)
 
 class Institution(db.Model):
  __tablename__="ums_institution"
@@ -145,7 +167,7 @@ def register():
   elif pw!=request.form.get("confirm",""): flash("Passwords do not match.","error")
   elif User.query.filter_by(email=email).first(): flash("Email already registered.","error")
   else:
-   u=User(name=name,email=email,password=generate_password_hash(pw)); db.session.add(u); db.session.commit(); session.clear(); session["uid"]=u.id; session["csrf"]=secrets.token_urlsafe(32); return redirect(url_for("dashboard"))
+   u=User(name=name,email=email,password=generate_password_hash(pw)); db.session.add(u); db.session.flush(); db.session.add(UserProfile(user_id=u.id,username=None)); db.session.commit(); session.clear(); session["uid"]=u.id; session["csrf"]=secrets.token_urlsafe(32); return redirect(url_for("profile_edit"))
  return render_template("register.html")
 
 @app.route("/login",methods=["GET","POST"])
@@ -159,6 +181,32 @@ def login():
 @app.post("/logout")
 @auth
 def logout(): session.clear(); return redirect(url_for("login"))
+
+@app.get("/profile/<int:uid>")
+@auth
+def profile(uid):
+ u=db.session.get(User,uid)
+ if not u: abort(404)
+ if uid!=g.user.id and (not u.profile or not u.profile.is_public): abort(404)
+ return render_template("profile.html",u=u,p=u.profile,is_own=uid==g.user.id)
+
+@app.route("/profile/edit",methods=["GET","POST"])
+@auth
+def profile_edit():
+ p=g.user.profile
+ if not p:
+  p=UserProfile(user_id=g.user.id); db.session.add(p)
+ if request.method=="POST":
+  username=request.form.get("username","").strip().lower().replace(" ","_") or None
+  if username and (len(username)<3 or len(username)>60): flash("Username must be 3 to 60 characters.","error")
+  elif username and UserProfile.query.filter(UserProfile.username==username,UserProfile.user_id!=g.user.id).first(): flash("Username is already taken.","error")
+  else:
+   p.username=username; p.bio=request.form.get("bio","").strip(); p.phone=request.form.get("phone","").strip(); p.location=request.form.get("location","").strip(); p.gender=request.form.get("gender","").strip(); p.institution_text=request.form.get("institution_text","").strip(); p.department=request.form.get("department","").strip(); p.program=request.form.get("program","").strip(); p.student_id=request.form.get("student_id","").strip(); p.profile_photo_url=request.form.get("profile_photo_url","").strip(); p.website=request.form.get("website","").strip(); p.facebook_url=request.form.get("facebook_url","").strip(); p.linkedin_url=request.form.get("linkedin_url","").strip(); p.is_public=request.form.get("is_public")=="on"
+   dob=request.form.get("date_of_birth","").strip()
+   try: p.date_of_birth=datetime.fromisoformat(dob).date() if dob else None
+   except ValueError: p.date_of_birth=None
+   db.session.commit(); flash("Profile saved successfully.","success"); return redirect(url_for("profile",uid=g.user.id))
+ return render_template("profile_edit.html",u=g.user,p=p)
 
 @app.get("/dashboard")
 @auth
