@@ -488,27 +488,10 @@ def init_db():
         if column not in message_existing_columns:
             conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
 
-    # End-to-end encrypted messaging metadata. The server stores ciphertext
-    # and public keys only; plaintext message content is never required in
-    # production for E2EE conversations. Existing plaintext rows remain
-    # readable for backward compatibility and can be migrated/cleared later.
+    # Legacy message columns are retained for compatibility with existing databases.
     for column, definition in {
-        "ciphertext": "TEXT DEFAULT NULL",
-        "iv": "TEXT DEFAULT NULL",
-        "encryption_version": "INTEGER NOT NULL DEFAULT 0",
-    }.items():
         if column not in message_existing_columns:
             conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_keys (
-            user_id INTEGER PRIMARY KEY,
-            public_key TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS friend_requests (
@@ -561,9 +544,6 @@ def init_db():
             FOREIGN KEY (peer_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
-    chat_pref_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_preferences)").fetchall()}
-    if "e2ee_enabled" not in chat_pref_columns:
-        conn.execute("ALTER TABLE chat_preferences ADD COLUMN e2ee_enabled INTEGER NOT NULL DEFAULT 0")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_groups (
@@ -613,19 +593,6 @@ def init_db():
             created_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             revoked INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS encrypted_key_backups (
-            user_id INTEGER PRIMARY KEY,
-            version INTEGER NOT NULL DEFAULT 1,
-            salt TEXT NOT NULL,
-            iv TEXT NOT NULL,
-            ciphertext TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
@@ -2935,10 +2902,6 @@ def users_are_blocked(conn, user_a, user_b):
     ).fetchone())
 
 
-def get_public_key(conn, user_id):
-    row = conn.execute("SELECT public_key FROM user_keys WHERE user_id=?", (user_id,)).fetchone()
-    return row["public_key"] if row else None
-
 
 @app.route("/messages/<int:user_id>")
 def chat(user_id):
@@ -2976,35 +2939,6 @@ def chat(user_id):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
-
-
-@app.route("/api/e2ee/key", methods=["POST"])
-def save_e2ee_key():
-    if not user_required(): return jsonify({"error":"login_required"}), 401
-    require_csrf()
-    public_key=(request.get_json(silent=True) or {}).get("public_key", "").strip()
-    if len(public_key) < 40 or len(public_key) > 5000:
-        return jsonify({"error":"invalid_public_key"}), 400
-    uid=session["user_id"]; now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn=get_db_connection()
-    existing=conn.execute("SELECT user_id FROM user_keys WHERE user_id=?",(uid,)).fetchone()
-    if existing:
-        conn.execute("UPDATE user_keys SET public_key=?, updated_at=? WHERE user_id=?",(public_key,now,uid))
-    else:
-        conn.execute("INSERT INTO user_keys(user_id,public_key,created_at,updated_at) VALUES(?,?,?,?)",(uid,public_key,now,now))
-    conn.commit(); conn.close()
-    return jsonify({"ok":True,"public_key":public_key})
-
-
-@app.route("/api/e2ee/key/<int:user_id>")
-def get_e2ee_key(user_id):
-    if not user_required(): return jsonify({"error":"login_required"}), 401
-    conn=get_db_connection(); key=get_public_key(conn,user_id); conn.close()
-    # A peer may simply not have opened secure chat on this device yet.
-    # Return a normal JSON response instead of a noisy 404; the browser client
-    # already treats a missing key as a not-ready state.
-    if not key: return jsonify({"public_key": None, "ready": False})
-    return jsonify({"public_key":key, "ready": True})
 
 
 @app.route("/messages/send", methods=["POST"])
