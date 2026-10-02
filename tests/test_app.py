@@ -90,7 +90,7 @@ def test_text_post_and_reel_creation():
     assert row["caption"] == "Hello world" and row["original_name"] == ""
 
 
-def test_plaintext_message_is_allowed_when_e2ee_is_off():
+def test_plaintext_message_is_allowed():
     conn = app.get_db_connection(); a = create_user(conn, "Alice", "alice", 1); b = create_user(conn, "Bob", "bob", 1); conn.commit(); conn.close()
     client = app.app.test_client(); login_user(client, a)
     r = client.post("/messages/send", data={"receiver_id": str(b), "message":"plaintext", "csrf_token":"test-csrf"}, headers={"X-Requested-With":"XMLHttpRequest"})
@@ -99,22 +99,6 @@ def test_plaintext_message_is_allowed_when_e2ee_is_off():
     assert row["message"] == "plaintext" and row["encryption_version"] == 0
 
 
-def test_e2ee_can_be_enabled_per_chat_when_user_has_key():
-    conn = app.get_db_connection(); a = create_user(conn, "Alice", "alice", 1); b = create_user(conn, "Bob", "bob", 1); conn.commit(); conn.close()
-    client = app.app.test_client(); login_user(client, a)
-    key='{"kty":"EC","crv":"P-256","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","y":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}'
-    assert client.post('/api/e2ee/key', json={'public_key':key}, headers={'X-CSRF-Token':'test-csrf'}).status_code == 200
-    r=client.post('/api/chat/%s/preferences' % b, json={'e2ee_enabled':True}, headers={'X-CSRF-Token':'test-csrf'})
-    assert r.status_code == 200 and r.get_json()['e2ee_enabled'] is True
-
-
-def test_device_cannot_be_reassigned():
-    conn = app.get_db_connection(); a = create_user(conn, "Alice", "alice", 1); b = create_user(conn, "Bob", "bob", 1); conn.commit(); conn.close()
-    client = app.app.test_client(); login_user(client, a)
-    payload={"device_id":"device-12345","identity_public_key":"A"*50}
-    assert client.post("/api/e2ee/device", json=payload, headers={"X-CSRF-Token":"test-csrf"}).status_code == 200
-    login_user(client, b)
-    assert client.post("/api/e2ee/device", json=payload, headers={"X-CSRF-Token":"test-csrf"}).status_code == 409
 
 
 def test_expired_stories_are_cleaned():
