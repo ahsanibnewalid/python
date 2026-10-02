@@ -9,7 +9,7 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
 </style>
 <div class="mobile-more-backdrop" id="mobileMoreBackdrop" onclick="toggleMobileMore(false)"></div>
 <div class="mobile-more-sheet" id="mobileMoreSheet">
-<a href="{{ url_for('my_dashboard') }}">📊 <span>My Dashboard</span></a><a href="{{ url_for('saved_posts_page') }}">🔖 <span>Saved</span></a><a href="{{ url_for('campus_services') }}">🏫 <span>Campus Services</span></a><a href="{{ url_for('groups_page') }}">👥 <span>Groups</span></a><a href="{{ url_for('reels_page') }}">▣ <span>Reels</span></a><a href="{{ url_for('my_profile') }}">👤 <span>Profile / CV</span></a><a href="{{ url_for('profile_settings') }}">⚙️ <span>Profile & Study Settings</span></a><a href="{{ url_for('appearance_settings') }}">🎨 <span>Appearance</span></a><a href="/notifications">🔔 <span>Notifications</span></a><a href="{{ url_for('user_home') }}#people">🔎 <span>Find Students</span></a><a href="{{ url_for('user_logout') }}">↪️ <span>Log Out</span></a>
+<a id="mobileContinueLink" href="{{ url_for('my_dashboard') }}">▶️ <span>Continue where you left off</span></a><a href="{{ url_for('my_dashboard') }}">📊 <span>My Dashboard</span></a><a href="{{ url_for('saved_posts_page') }}">🔖 <span>Saved</span></a><a href="{{ url_for('campus_services') }}">🏫 <span>Campus Services</span></a><a href="{{ url_for('groups_page') }}">👥 <span>Groups</span></a><a href="{{ url_for('reels_page') }}">▣ <span>Reels</span></a><a href="{{ url_for('my_profile') }}">👤 <span>Profile / CV</span></a><a href="{{ url_for('profile_settings') }}">⚙️ <span>Profile & Study Settings</span></a><a href="{{ url_for('appearance_settings') }}">🎨 <span>Appearance</span></a><a href="/notifications">🔔 <span>Notifications</span></a><a href="{{ url_for('user_home') }}#people">🔎 <span>Find Students</span></a><a href="{{ url_for('user_logout') }}">↪️ <span>Log Out</span></a>
 </div>
 
 <style>
@@ -50,4 +50,18 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
 <a class="{% if request.endpoint in ['messages','chat','chat_groups_page','chat_group'] %}active{% endif %}" href="{{ url_for('messages') }}"><span class="mobile-icon">◉</span>{% if unread_count|default(0) %}<span class="mobile-badge">{{ unread_count }}</span>{% endif %}<span>Messages</span></a>
 <button type="button" onclick="toggleMobileMore()"><span class="mobile-icon">☰</span><span>Menu</span></button>
 </nav>
-<script>function toggleMobileMore(force){const s=document.getElementById('mobileMoreSheet'),b=document.getElementById('mobileMoreBackdrop');if(!s||!b)return;const o=typeof force==='boolean'?force:!s.classList.contains('open');s.classList.toggle('open',o);b.classList.toggle('open',o)}document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleMobileMore(false)})</script>
+<script>
+(function(){
+  const key='uc_mobile_resume_path';
+  try{
+    const skip=['/login','/user-login','/logout','/register'];
+    if(!skip.some(p=>location.pathname.startsWith(p))&&location.pathname!=='/'){
+      localStorage.setItem(key,location.pathname+location.search);
+    }
+    const link=document.getElementById('mobileContinueLink');
+    const saved=localStorage.getItem(key);
+    if(link&&saved&&saved!==location.pathname+location.search){link.href=saved;}
+    else if(link){link.querySelector('span').textContent='Continue where you left off';}
+  }catch(e){}
+})();
+function toggleMobileMore(force){const s=document.getElementById('mobileMoreSheet'),b=document.getElementById('mobileMoreBackdrop');if(!s||!b)return;const o=typeof force==='boolean'?force:!s.classList.contains('open');s.classList.toggle('open',o);b.classList.toggle('open',o)}document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleMobileMore(false)})</script>
