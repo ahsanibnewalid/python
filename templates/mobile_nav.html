@@ -32,6 +32,17 @@ html[data-theme="dark"] .mobile-bottom-nav,html[data-theme="dark"] .mobile-more-
   document.addEventListener('visibilitychange',()=>document.hidden?stop():start());
 })();
 </script>
+<script>
+(function(){
+  if(window.__ucAnalyticsStarted)return;
+  window.__ucAnalyticsStarted=true;
+  const started=Date.now();
+  function send(event_type,target_type="",target_id="",duration_seconds=0){fetch('/api/analytics/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event_type,target_type,target_id,duration_seconds})}).catch(()=>{});}
+  send('page_view','page',location.pathname);
+  const timer=setInterval(()=>{if(!document.hidden)send('site_heartbeat','page',location.pathname,Math.min(30,Math.round((Date.now()-started)/1000)));},30000);
+  window.addEventListener('beforeunload',()=>{clearInterval(timer);send('site_heartbeat','page',location.pathname,Math.min(30,Math.round((Date.now()-started)/1000)));});
+})();
+</script>
 <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
 <a class="{% if request.endpoint == 'user_home' %}active{% endif %}" href="{{ url_for('user_home') }}"><span class="mobile-icon">⌂</span><span>Home</span></a>
 <a class="{% if request.endpoint == 'reels_page' %}active{% endif %}" href="{{ url_for('reels_page') }}"><span class="mobile-icon">▣</span><span>Reels</span></a>
