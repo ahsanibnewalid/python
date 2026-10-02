@@ -159,6 +159,34 @@ def install(app, get_db_connection, init_db):
         for key, table in [("users","users"),("posts","posts"),("reels","reels"),("stories","stories"),("reports","message_reports"),("jobs","platform_jobs")]:
             try: counts[key] = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"]
             except Exception: counts[key] = 0
+
+        # Operational inventory: every query is optional so the command center
+        # remains compatible with older installations during schema upgrades.
+        def optional_count(sql):
+            try:
+                row = conn.execute(sql).fetchone()
+                return int((row["c"] if row else 0) or 0)
+            except Exception:
+                return 0
+
+        operations = {
+            "organizations": optional_count("SELECT COUNT(*) AS c FROM organizations"),
+            "institutions": optional_count("SELECT COUNT(*) AS c FROM institutions"),
+            "platform_spaces": optional_count("SELECT COUNT(*) AS c FROM platform_spaces"),
+            "unverified_spaces": optional_count("SELECT COUNT(*) AS c FROM platform_spaces WHERE verification_status!='verified'"),
+            "pending_memberships": optional_count("SELECT COUNT(*) AS c FROM space_membership_requests WHERE status='pending'"),
+            "admin_staff": optional_count("SELECT COUNT(*) AS c FROM admin_staff WHERE status='active'"),
+            "usage_events": optional_count("SELECT COUNT(*) AS c FROM usage_events"),
+        }
+        attention = []
+        if operations["unverified_spaces"]:
+            attention.append({"kind":"trust","count":operations["unverified_spaces"],"label":"organization/institution pages awaiting verification","url":url_for("admin_god") + "#trust"})
+        if operations["pending_memberships"]:
+            attention.append({"kind":"membership","count":operations["pending_memberships"],"label":"membership requests awaiting review","url":url_for("admin_god") + "#trust"})
+        if counts.get("reports", 0):
+            attention.append({"kind":"reports","count":counts["reports"],"label":"reported items recorded for moderation","url":url_for("admin_god") + "#moderation"})
+        operations["attention_count"] = len(attention)
+
         staff = conn.execute("SELECT * FROM admin_staff ORDER BY id DESC").fetchall(); staff_data=[]
         import app as app_module
         owner_username = getattr(app_module, "ADMIN_USER", os.environ.get("ADMIN_USER", "admin")).strip()
@@ -204,7 +232,7 @@ def install(app, get_db_connection, init_db):
             "environment":os.environ.get("APP_ENV","development"),
         }
         mobile_build=refresh_mobile_build(mobile_build_row())
-        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""),mobile_build=mobile_build,mobile_builder_configured=bool(github_config()[0]))
+        return render_template("admin_god.html",counts=counts,operations=operations,attention=attention,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""),mobile_build=mobile_build,mobile_builder_configured=bool(github_config()[0]))
 
     def analytics_event(event_type, target_type="", target_id="", duration_seconds=0, metadata=""):
         if not session.get("user_logged_in") or session.get("user_id") is None:
