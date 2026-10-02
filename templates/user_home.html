@@ -152,7 +152,23 @@ html[data-theme="dark"]{--bg:#18191a;--card:#242526;--text:#e4e6eb;--muted:#b0b3
 </div></main>
 <script>
 const CSRF={{ csrf|tojson }};let offset={{ feed_posts|length }};
-async function toggleSavePost(id,button){try{const r=await fetch('/api/posts/'+id+'/save',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest'}});if(!r.ok)return;const d=await r.json();button.textContent=d.saved?'🔖 Saved':'🔖 Save';button.classList.toggle('liked',!!d.saved)}catch(e){}}
+async function toggleSavePost(id,button){
+  if(!button||button.dataset.busy==='1')return;
+  const previous=button.textContent;
+  button.dataset.busy='1';button.disabled=true;
+  try{
+    const r=await fetch('/api/posts/'+id+'/save',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||('Save failed ('+r.status+')'));
+    button.textContent=d.saved?'🔖 Saved':'🔖 Save';
+    button.classList.toggle('liked',!!d.saved);
+    button.setAttribute('aria-pressed',d.saved?'true':'false');
+  }catch(e){
+    button.textContent=previous;
+    const msg=e&&e.message?e.message:'Could not save this post.';
+    if(window.showToast)window.showToast(msg,'error');else alert(msg);
+  }finally{button.disabled=false;delete button.dataset.busy;}
+}
 
 let composerMode='post';
 function openComposer(mode){
