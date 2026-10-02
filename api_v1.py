@@ -694,7 +694,7 @@ def conversations():
             (other_id,),
         ).fetchone()
         last = conn.execute(
-            "SELECT message,ciphertext,encryption_version,created_at FROM messages WHERE id=?",
+            "SELECT message,created_at FROM messages WHERE id=?",
             (row["last_id"],),
         ).fetchone()
         unread = conn.execute(
@@ -707,7 +707,6 @@ def conversations():
             "username": user["username"] if user else "",
             "photo_url": public_photo_url(user["photo"]) if user else None,
             "last_message": (last["message"] if last else ""),
-            "encryption_version": 0,
             "last_created_at": (last["created_at"] if last else ""),
             "unread_count": int(unread or 0),
         })
