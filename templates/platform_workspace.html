@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>University Connect Platform Workspace</title>
+<title>University Management System</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='university-connect.css') }}"><style>
 :root{--ink:#172033;--muted:#667085;--line:#e7ebf2;--blue:#1456c4;--blue2:#0b3d91;--bg:#f4f7fb;--card:#fff;--green:#087443}
-*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+#jobs,#cv,#applications,#messages,#companies,#office{display:none!important}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
 a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:13px 24px;display:flex;gap:18px;align-items:center;justify-content:space-between;z-index:20}.brand{display:flex;align-items:center;gap:10px;font-weight:900}.brandmark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--blue2),#4f8ff7);color:#fff;box-shadow:0 8px 20px rgba(20,86,196,.2)}.top nav{display:flex;gap:8px}.top nav a{font-weight:800;text-decoration:none;padding:9px 12px;border-radius:10px}.top nav a:hover{background:#edf3ff;color:var(--blue)}
 .wrap{max-width:1260px;margin:0 auto;padding:26px 16px 60px}.hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#102a5b 0%,#1456c4 58%,#4f8ff7 100%);color:#fff;border-radius:24px;padding:32px;margin-bottom:18px;box-shadow:0 18px 45px rgba(20,86,196,.18)}.hero:after{content:"";position:absolute;width:260px;height:260px;border:1px solid rgba(255,255,255,.18);border-radius:50%;right:-80px;top:-120px}.eyebrow{font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;opacity:.78}.hero h1{margin:7px 0 8px;font-size:clamp(28px,4vw,42px);line-height:1.05}.hero p{max-width:760px;margin:0;color:rgba(255,255,255,.88);font-size:15px;line-height:1.6}.hero-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}.hero-actions a{background:#fff;color:#103d86;text-decoration:none;padding:10px 14px;border-radius:11px;font-weight:900}.hero-actions a.ghost{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.22)}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:-2px 0 18px}.stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px 16px;box-shadow:0 5px 18px rgba(23,32,51,.04)}.stat strong{display:block;font-size:23px}.stat span{color:var(--muted);font-size:12px;font-weight:700}
@@ -13,11 +13,11 @@ a{color:inherit}.top{position:sticky;top:0;background:rgba(255,255,255,.94);back
 </style>
 </head>
 <body class="uc-screen-workspace">
-<header class="top"><a class="brand" href="{{ url_for('user_home') }}"><span class="brandmark">🎓</span><span>University Connect</span></a><nav><a href="{{ url_for('v2.ui_dashboard') }}">Overview</a><a href="{{ url_for('user_home') }}">Social Home</a></nav></header>
+<header class="top"><a class="brand" href="{{ url_for('v2.workspace') }}"><span class="brandmark">🎓</span><span>University Management</span></a><nav><a href="{{ url_for('v2.workspace') }}">Management Home</a></nav></header>
 <main class="wrap">
-<section class="hero"><div class="eyebrow">Your student & career space</div><h1>Learn. Connect. Get hired.</h1><p>One focused workspace for university life and professional growth—courses, recorded classes, notices, jobs, applications, CVs and conversations without leaving your platform.</p><div class="hero-actions"><a href="#jobs" onclick="show('jobs')">💼 Explore jobs</a><a class="ghost" href="#cv" onclick="show('cv')">📄 Build my CV</a><a class="ghost" href="#messages" onclick="show('messages')">💬 Messages</a></div></section><div class="stats"><div class="stat"><strong>💼</strong><span>Jobs & opportunities</span></div><div class="stat"><strong>📄</strong><span>Career-ready CV</span></div><div class="stat"><strong>🎓</strong><span>Academic workspace</span></div><div class="stat"><strong>💬</strong><span>People & recruiters</span></div></div>
+<section class="hero"><div class="eyebrow">Academic administration</div><h1>University Management System</h1><p>Manage institutions, departments, academic programs, courses, staff roles, student enrollments, notices and study resources from one secure workspace.</p><div class="hero-actions"><a href="#universities" onclick="show('universities')">🎓 Institutions</a><a class="ghost" href="#resources" onclick="show('resources')">📚 Study resources</a><a class="ghost" href="#admin" onclick="show('admin')">⚙ Management tools</a></div></section><div class="stats"><div class="stat"><strong>🏛</strong><span>Institutions & departments</span></div><div class="stat"><strong>🎓</strong><span>Programs & sessions</span></div><div class="stat"><strong>📚</strong><span>Courses & resources</span></div><div class="stat"><strong>🔐</strong><span>Role-based access</span></div></div>
 <div id="flash"></div>
-<div class="tabs"><button class="active" onclick="show('jobs',this)">💼 Jobs</button><button onclick="show('cv',this)">📄 My CV</button><button onclick="show('applications',this)">📬 Applications</button><button onclick="show('messages',this)">💬 Messages</button><button onclick="show('notifications',this)">🔔 Notifications</button><button onclick="show('universities',this)">🎓 Universities</button><button onclick="show('resources',this)">📚 Study Resources</button><button onclick="show('companies',this)">🏢 Companies</button><button id="officeTab" style="display:none" onclick="show('office',this)">👔 My Office</button><button id="manageTab" style="display:none" onclick="show('admin',this)">⚙ Manage</button></div>
+<div class="tabs"><button class="active" onclick="show('universities',this)">🎓 Institutions</button><button onclick="show('resources',this)">📚 Study Resources</button><button onclick="show('notifications',this)">📢 Notices</button><button id="manageTab" onclick="show('admin',this)">⚙ Management tools</button></div>
 
 <section id="jobs" class="panel">
 <div class="grid">
@@ -194,7 +194,7 @@ async function loadNotifications(){const d=await api('/platform/notifications');
 async function createInstitution(e){e.preventDefault();try{const d=await api('/platform/institutions',{method:'POST',body:JSON.stringify({name:$('inst_name').value,institution_type:$('inst_type').value,description:$('inst_desc').value})});msg('Institution #'+d.id+' created.')}catch(e){msg(e.message,true)}}
 async function createOrganization(e){e.preventDefault();try{const d=await api('/platform/organizations',{method:'POST',body:JSON.stringify({name:$('org_name').value,industry:$('org_industry').value,domain:$('org_domain').value,description:$('org_desc').value})});msg('Company created. You are now the owner.');location.href='/platform/organizations/'+d.id+'/office'}catch(e){msg(e.message,true)}}
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-loadJobs();
+show('universities');
 initWorkspaceCapabilities();
 </script>
 </body></html>
