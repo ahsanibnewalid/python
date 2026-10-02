@@ -488,11 +488,7 @@ def init_db():
         if column not in message_existing_columns:
             conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
 
-    # Legacy message columns are retained for compatibility with existing databases.
-    for column, definition in {
-        if column not in message_existing_columns:
-            conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
-
+    # Legacy encryption columns are no longer used by the application.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS friend_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
