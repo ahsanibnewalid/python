@@ -2487,7 +2487,9 @@ def my_profile():
     stored_view = profile["profile_view"] if "profile_view" in profile.keys() and profile["profile_view"] in ("facebook", "cv") else "facebook"
     requested_view = request.args.get("view", "").strip().lower()
     view = requested_view if requested_view in ("facebook", "cv") else stored_view
-    return render_template("premium_cv_profile.html" if view == "cv" else "facebook_profile.html", profile=profile, gallery=gallery, profile_posts=profile_posts, is_own=True)
+    friend_count=int(conn.execute("SELECT COUNT(*) FROM friendships WHERE user_id=?",(session["user_id"],)).fetchone()[0]) if profile else 0
+    friends=conn.execute("SELECT u.id,u.name,u.username,u.photo FROM friendships f JOIN users u ON u.id=f.friend_id WHERE f.user_id=? ORDER BY u.name COLLATE NOCASE LIMIT 50",(session["user_id"],)).fetchall() if profile else []
+    return render_template("premium_cv_profile.html" if view == "cv" else "facebook_profile.html", profile=profile, gallery=gallery, profile_posts=profile_posts, friend_count=friend_count, friends=friends, is_own=True)
 
 
 def create_media_update_post(conn, user_id, source_path, caption):
@@ -2784,11 +2786,17 @@ def public_profile(user_id):
         (user_id,)
     ).fetchall()
     profile_posts = serialize_posts(conn, fetch_user_posts(conn, user_id, 20, 0), session["user_id"])
+    friend_count = int(conn.execute("SELECT COUNT(*) FROM friendships WHERE user_id=?",(user_id,)).fetchone()[0])
+    friends = conn.execute("""
+        SELECT u.id,u.name,u.username,u.photo
+        FROM friendships f JOIN users u ON u.id=f.friend_id
+        WHERE f.user_id=? ORDER BY u.name COLLATE NOCASE LIMIT 50
+    """,(user_id,)).fetchall()
     conn.close()
 
     view = profile["profile_view"] if "profile_view" in profile.keys() and profile["profile_view"] in ("facebook", "cv") else "facebook"
     template = "premium_cv_profile.html" if view == "cv" else "facebook_profile.html"
-    return render_template(template, profile=profile, gallery=gallery, profile_posts=profile_posts, is_own=(user_id == session["user_id"]))
+    return render_template(template, profile=profile, gallery=gallery, profile_posts=profile_posts, friend_count=friend_count, friends=friends, is_own=(user_id == session["user_id"]))
 
 
 # ---------------------------------------------------------
