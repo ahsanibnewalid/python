@@ -3364,7 +3364,7 @@ def group_detail(group_id):
         (SELECT COUNT(*) FROM group_post_comments c WHERE c.post_id=p.id) comment_count
         FROM group_posts p JOIN users u ON u.id=p.user_id WHERE p.group_id=? ORDER BY p.id DESC""",(uid,group_id)).fetchall() if eligible else []
     comments={p["id"]:conn.execute("SELECT c.*,u.name FROM group_post_comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? ORDER BY c.id",(p["id"],)).fetchall() for p in posts}
-    members=conn.execute("SELECT u.id,u.name,u.username,u.photo,EXISTS(SELECT 1 FROM group_admins ga WHERE ga.group_id=? AND ga.user_id=u.id) is_admin FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=? ORDER BY u.name",(group_id,group_id)).fetchall()
+    members=conn.execute("SELECT u.id,u.name,u.username,u.photo,EXISTS(SELECT 1 FROM group_admins ga WHERE ga.group_id=? AND ga.user_id=u.id) is_admin FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=? ORDER BY u.name",(group_id,group_id)).fetchall() if eligible else []
     requests=conn.execute("SELECT u.id,u.name,u.username FROM group_join_requests r JOIN users u ON u.id=r.user_id WHERE r.group_id=? AND r.status='pending' ORDER BY r.created_at",(group_id,)).fetchall() if is_admin else []
     conn.close(); return render_template("group_detail.html",group=group,posts=posts,comments=comments,members=members,requests=requests,member=member,is_admin=is_admin,pending=pending,eligible=eligible,csrf=csrf_token())
 
