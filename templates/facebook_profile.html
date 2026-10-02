@@ -37,7 +37,7 @@ html[data-theme="dark"] .empty{color:#aebdce}
     <div class="identity-main"><h1>{{ profile['name'] }}</h1><div class="identity-sub muted">{% if profile['username'] %}@{{ profile['username'] }} · {% endif %}{{ profile['headline'] or profile['occupation'] or 'University student' }}</div>{% if profile['university'] %}<div class="identity-sub muted">🎓 {{ profile['university'] }}{% if profile['department'] %} · {{ profile['department'] }}{% endif %}</div>{% endif %}</div>
     {% if is_own %}<form class="cover-form" method="POST" action="{{ url_for('update_cover_photo') }}" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="btn light">🖼 Change cover photo<input type="file" name="cover_photo" accept="image/*" onchange="this.form.submit()" hidden></label></form>{% endif %}
   </div>
-  <div class="tabs" role="tablist" aria-label="Profile sections">
+  <div style="padding:14px 28px;border-bottom:1px solid var(--line);font-weight:800">👥 {{ friend_count|default(0) }} friends {% if friends %}<span style="font-weight:500;color:var(--muted);margin-left:8px">{% for f in friends[:8] %}<a href="{{ url_for('public_profile',user_id=f['id']) }}" style="margin-right:8px">{{ f['name'] }}</a>{% endfor %}</span>{% endif %}</div><div class="tabs" role="tablist" aria-label="Profile sections">
     <button class="tab active" type="button" data-tab="about">About</button><button class="tab" type="button" data-tab="posts">Posts{% if profile_posts %} · {{ profile_posts|length }}{% endif %}</button><button class="tab" type="button" data-tab="photos">Photos{% if gallery %} · {{ gallery|length }}{% endif %}</button><button class="tab" type="button" data-tab="professional">Professional</button>
   </div>
 </section>
