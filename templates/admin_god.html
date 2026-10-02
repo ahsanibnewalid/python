@@ -14,6 +14,8 @@
     <p class="muted" style="margin-top:12px">Set <code>GITHUB_ACTIONS_TOKEN</code> on the server. Optional: <code>GITHUB_ACTIONS_REPO</code> and <code>GITHUB_APK_WORKFLOW</code>.</p>
   {% endif %}
   <div class="actions" style="margin-top:14px">
+    <button id="github-test" class="primary" type="button" {% if not mobile_builder_configured %}disabled{% endif %}>Test GitHub connection</button>
+    <span id="github-test-result" class="muted"></span>
     <form method="post" action="{{ url_for('admin_god_mobile_build') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <button class="primary" type="submit" {% if not mobile_builder_configured %}disabled{% endif %}>Build installable APK</button>
@@ -30,6 +32,29 @@
   const downloadEl=document.getElementById('apk-download');
   const errorEl=document.getElementById('apk-error');
   if(!statusEl) return;
+  function testGithub(){
+    const el=document.getElementById('github-test-result');
+    if(!el) return;
+    el.textContent='Testing…';
+    fetch('{{ url_for("admin_god_github_test") }}',{credentials:'same-origin',headers:{'Accept':'application/json'}})
+      .then(async r=>({ok:r.ok,data:await r.json()}))
+      .then(x=>{
+        const d=x.data||{};
+        if(x.ok && d.connected){
+          const perms=Object.keys(d.token_permissions||{}).filter(k=>d.token_permissions[k]).join(', ');
+          el.textContent='Connected · '+d.repository+' · '+(d.workflow_name||d.workflow)+(perms?' · permissions: '+perms:'');
+          statusEl.textContent='CONNECTED';
+          statusEl.className='pill';
+        } else {
+          el.textContent='Not connected · '+(d.message||'GitHub connection test failed.');
+          statusEl.textContent='NOT CONNECTED';
+          statusEl.className='pill off';
+        }
+      }).catch(()=>{el.textContent='Connection test failed.';});
+  }
+  const githubTest=document.getElementById('github-test');
+  if(githubTest) githubTest.addEventListener('click',testGithub);
+
   function refresh(){
     fetch('{{ url_for("admin_god_mobile_status") }}',{credentials:'same-origin',headers:{'Accept':'application/json'}})
       .then(r=>r.ok?r.json():null).then(d=>{
