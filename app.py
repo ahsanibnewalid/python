@@ -448,7 +448,9 @@ def init_db():
         "interests": "TEXT DEFAULT ''",
         "birth_date": "TEXT DEFAULT ''",
         "cover_photo": "TEXT DEFAULT ''",
-        "profile_view": "TEXT DEFAULT 'facebook'"
+        "profile_view": "TEXT DEFAULT 'facebook'",
+        "timezone": "TEXT DEFAULT 'Asia/Dhaka'",
+        "time_format": "TEXT DEFAULT '12h'"
     }
     for column, definition in profile_columns.items():
         if column not in existing_columns:
@@ -474,6 +476,8 @@ def init_db():
         "delivered_at": "TEXT DEFAULT NULL",
         "read_at": "TEXT DEFAULT NULL",
         "expires_at": "TEXT DEFAULT NULL",
+        "reply_to_id": "INTEGER DEFAULT NULL",
+        "edited_at": "TEXT DEFAULT NULL",
     }
     message_existing_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()
@@ -503,6 +507,33 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS friend_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER NOT NULL,
+            receiver_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(sender_id, receiver_id),
+            FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(receiver_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver_status ON friend_requests(receiver_id,status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_friend_requests_sender_status ON friend_requests(sender_id,status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS friendships (
+            user_id INTEGER NOT NULL,
+            friend_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, friend_id),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(friend_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS user_blocks (
@@ -1905,28 +1936,80 @@ def toggle_saved_post(post_id):
 def network_page():
     if not user_required():
         return redirect(url_for("user_login"))
-    user_id = session["user_id"]
-    search = request.args.get("search", "").strip()
-    conn = get_db_connection()
-    current_user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    if not current_user:
-        conn.close()
-        return redirect(url_for("user_login"))
-    if search:
-        like = f"%{search}%"
-        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users
-            WHERE id!=?
-              AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=users.id) OR (b.blocker_id=users.id AND b.blocked_id=?))
-              AND (name LIKE ? OR username LIKE ? OR gmail LIKE ? OR nickname LIKE ?)
-            ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,user_id,user_id,like,like,like,like)).fetchall()
-    else:
-        users = conn.execute("""SELECT id,name,gmail,photo,username,nickname,university_id FROM users
-            WHERE id!=?
-              AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=users.id) OR (b.blocker_id=users.id AND b.blocked_id=?))
-            ORDER BY name COLLATE NOCASE LIMIT 100""", (user_id,user_id,user_id)).fetchall()
+    user_id=session["user_id"]; search=request.args.get("search","").strip()
+    conn=get_db_connection(); current_user=conn.execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone()
+    if not current_user: conn.close(); return redirect(url_for("user_login"))
+    like=f"%{search}%"
+    users=conn.execute("""
+        SELECT u.id,u.name,u.gmail,u.photo,u.username,u.nickname,u.university_id,
+          CASE
+            WHEN EXISTS(SELECT 1 FROM friendships f WHERE f.user_id=? AND f.friend_id=u.id) THEN 'friends'
+            WHEN EXISTS(SELECT 1 FROM friend_requests r WHERE r.sender_id=? AND r.receiver_id=u.id AND r.status='pending') THEN 'sent'
+            WHEN EXISTS(SELECT 1 FROM friend_requests r WHERE r.sender_id=u.id AND r.receiver_id=? AND r.status='pending') THEN 'received'
+            ELSE 'none'
+          END AS connection_status,
+          (SELECT COUNT(*) FROM friendships f2 WHERE f2.user_id=u.id) AS friend_count
+        FROM users u
+        WHERE u.id!=?
+          AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE (b.blocker_id=? AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=?))
+          AND (u.name LIKE ? OR u.username LIKE ? OR u.gmail LIKE ? OR u.nickname LIKE ?)
+        ORDER BY u.name COLLATE NOCASE LIMIT 100
+    """,(user_id,user_id,user_id,user_id,user_id,user_id,like,like,like,like)).fetchall()
     conn.close()
-    return render_template("network.html", current_user=current_user, users=users, search=search, csrf=csrf_token(), site_name=get_site_name())
+    return render_template("network.html",current_user=current_user,users=users,search=search,csrf=csrf_token(),site_name=get_site_name())
 
+@app.route("/api/friends/<int:user_id>/request",methods=["POST"])
+def send_friend_request(user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]
+    if uid==user_id: return jsonify({"error":"invalid_user"}),400
+    conn=get_db_connection()
+    if not conn.execute("SELECT id FROM users WHERE id=?",(user_id,)).fetchone(): conn.close(); return jsonify({"error":"user_not_found"}),404
+    if users_are_blocked(conn,uid,user_id): conn.close(); return jsonify({"error":"user_blocked"}),403
+    if conn.execute("SELECT 1 FROM friendships WHERE user_id=? AND friend_id=?",(uid,user_id)).fetchone(): conn.close(); return jsonify({"status":"friends"})
+    now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    incoming=conn.execute("SELECT id FROM friend_requests WHERE sender_id=? AND receiver_id=? AND status='pending'",(user_id,uid)).fetchone()
+    if incoming:
+        conn.execute("UPDATE friend_requests SET status='accepted',updated_at=? WHERE id=?",(now,incoming["id"]))
+        conn.execute("INSERT OR IGNORE INTO friendships(user_id,friend_id,created_at) VALUES(?,?,?)",(uid,user_id,now))
+        conn.execute("INSERT OR IGNORE INTO friendships(user_id,friend_id,created_at) VALUES(?,?,?)",(user_id,uid,now))
+        conn.commit(); conn.close(); return jsonify({"status":"friends"})
+    conn.execute("UPDATE friend_requests SET status='cancelled',updated_at=? WHERE sender_id=? AND receiver_id=? AND status='pending'",(now,uid,user_id))
+    conn.execute("INSERT INTO friend_requests(sender_id,receiver_id,status,created_at,updated_at) VALUES(?,?,?,?,?)",(uid,user_id,"pending",now,now))
+    conn.commit(); conn.close(); return jsonify({"status":"sent"})
+
+@app.route("/api/friends/<int:user_id>/accept",methods=["POST"])
+def accept_friend_request(user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection()
+    row=conn.execute("SELECT id FROM friend_requests WHERE sender_id=? AND receiver_id=? AND status='pending'",(user_id,uid)).fetchone()
+    if not row: conn.close(); return jsonify({"error":"request_not_found"}),404
+    now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("UPDATE friend_requests SET status='accepted',updated_at=? WHERE id=?",(now,row["id"]))
+    conn.execute("INSERT OR IGNORE INTO friendships(user_id,friend_id,created_at) VALUES(?,?,?)",(uid,user_id,now))
+    conn.execute("INSERT OR IGNORE INTO friendships(user_id,friend_id,created_at) VALUES(?,?,?)",(user_id,uid,now))
+    conn.commit(); conn.close(); return jsonify({"status":"friends"})
+
+@app.route("/api/friends/<int:user_id>/reject",methods=["POST"])
+def reject_friend_request(user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection()
+    conn.execute("UPDATE friend_requests SET status='rejected',updated_at=? WHERE sender_id=? AND receiver_id=? AND status='pending'",(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),user_id,uid))
+    conn.commit(); conn.close(); return jsonify({"status":"none"})
+
+@app.route("/api/friends/<int:user_id>/cancel",methods=["POST"])
+def cancel_friend_request(user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection()
+    conn.execute("UPDATE friend_requests SET status='cancelled',updated_at=? WHERE sender_id=? AND receiver_id=? AND status='pending'",(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),uid,user_id))
+    conn.commit(); conn.close(); return jsonify({"status":"none"})
+
+@app.route("/api/friends/<int:user_id>/remove",methods=["POST"])
+def remove_friend(user_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; conn=get_db_connection()
+    conn.execute("DELETE FROM friendships WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)",(uid,user_id,user_id,uid))
+    conn.commit(); conn.close(); return jsonify({"status":"none"})
 
 @app.route("/feed")
 def feed():
@@ -2573,6 +2656,15 @@ def profile_settings():
             profile_view = request.form.get("profile_view", "facebook").strip().lower()
             if profile_view not in ("facebook", "cv"):
                 profile_view = "facebook"
+            timezone_name = request.form.get("timezone", "Asia/Dhaka").strip()
+            time_format = request.form.get("time_format", "12h").strip().lower()
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(timezone_name)
+            except Exception:
+                timezone_name = "Asia/Dhaka"
+            if time_format not in {"12h", "24h"}:
+                time_format = "12h"
 
             if not name or not username or not gmail:
                 flash("Name, username and Gmail are required.", "error")
@@ -2611,13 +2703,13 @@ def profile_settings():
                         relationship_status=?, partner=?, phone=?, location=?, birth_date=?,
                         headline=?, occupation=?, company=?, website=?, bio=?, education=?,
                         skills=?, experience=?, achievements=?, interests=?, projects=?, certifications=?, references_text=?, career_objective=?,
-                        study_status=?, department=?, academic_year=?, semester=?, student_id=?, university=?, profile_view=?
+                        study_status=?, department=?, academic_year=?, semester=?, student_id=?, university=?, profile_view=?, timezone=?, time_format=?
                     WHERE id=?
                     """,
                     (name, gmail, username, filename, nickname, age or None,
                      relationship_status or "Single", partner, phone, location, birth_date,
                      headline, occupation, company, website, bio, education, skills,
-                     experience, achievements, interests, projects, certifications, references_text, career_objective, study_status, department, academic_year, semester, student_id, university, profile_view, user_id)
+                     experience, achievements, interests, projects, certifications, references_text, career_objective, study_status, department, academic_year, semester, student_id, university, profile_view, timezone_name, time_format, user_id)
                 )
                 if profile_photo_changed and profile_photo_path:
                     create_media_update_post(conn, user_id, profile_photo_path, "updated their profile photo.")
@@ -2658,6 +2750,19 @@ def profile_settings():
     conn.close()
     return render_template("profile_settings.html", profile=profile)
 
+
+def format_user_datetime(value, timezone_name="Asia/Dhaka", time_format="12h"):
+    if not value: return ""
+    try:
+        from zoneinfo import ZoneInfo
+        raw=str(value).replace(" ","T")
+        if raw.endswith("Z"): raw=raw[:-1]+"+00:00"
+        dt=datetime.fromisoformat(raw)
+        if dt.tzinfo is None: dt=dt.replace(tzinfo=__import__("datetime").timezone.utc)
+        dt=dt.astimezone(ZoneInfo(timezone_name or "Asia/Dhaka"))
+        return dt.strftime("%d %b %Y, %I:%M %p" if time_format!="24h" else "%d %b %Y, %H:%M")
+    except Exception:
+        return str(value)
 
 @app.route("/profile/<int:user_id>")
 def public_profile(user_id):
