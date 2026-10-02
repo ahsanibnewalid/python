@@ -11,6 +11,17 @@
     <div class="stat"><b>{{ operations.admin_staff }}</b><span>Active moderators</span></div>
   </div>
 </section>
+<section class="card wide" id="quick-actions">
+  <div class="person-head"><div><h2>Owner Quick Actions</h2><div class="muted">Jump directly into the existing management tools without leaving the System Owner workspace.</div></div></div>
+  <div class="actions" style="margin-top:12px">
+    <a class="primary" href="{{ url_for('admin_users') }}">👤 Manage users</a>
+    <a class="primary" href="{{ url_for('admin_message_reports') }}">🚩 Message reports</a>
+    <a class="primary" href="{{ url_for('admin_campus') }}">🏫 Campus services</a>
+    <a class="primary" href="{{ url_for('admin_god_analytics',period='30') }}">📈 Platform analytics</a>
+    <a class="primary" href="#trust">🛡️ Trust queue</a>
+    <a class="primary" href="#moderation">📋 Audit trail</a>
+  </div>
+</section>
 <section class="card wide" id="attention">
   <div class="person-head"><div><h2>Action Queue</h2><div class="muted">Items that deserve System Owner attention before they become operational debt.</div></div></div>
   <div class="staff" style="margin-top:12px">
