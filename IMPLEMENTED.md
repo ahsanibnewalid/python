@@ -77,4 +77,3 @@ This build adds real application workflows rather than only database foundations
 
 ## Messenger optimization update
 - Voice calling and video calling/WebRTC functionality has been removed from the chat UI and backend to reduce browser/device overhead.
-- Private messaging, E2EE key handling, chat themes/wallpapers, disappearing messages, safety number, encrypted backup/restore, block/unblock, reporting, and profile access remain.
