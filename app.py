@@ -2443,6 +2443,41 @@ def create_media_update_post(conn, user_id, source_path, caption):
             except Exception: pass
         raise
 
+@app.route("/profile/photo", methods=["POST"])
+def update_profile_photo():
+    if not user_required():
+        return redirect(url_for("user_login"))
+    require_csrf()
+    uid = session["user_id"]
+    media = request.files.get("photo")
+    if not media or not media.filename:
+        flash("Choose a profile photo.", "error")
+        return redirect(url_for("profile_settings"))
+    if not allowed_file(media.filename) or not validate_image_signature(media):
+        flash("Invalid profile photo format.", "error")
+        return redirect(url_for("profile_settings"))
+    filename = generate_unique_filename(media.filename, prefix="profile")
+    path = save_public_upload(media, filename)
+    conn = get_db_connection()
+    old = conn.execute("SELECT photo FROM users WHERE id=?", (uid,)).fetchone()
+    try:
+        conn.execute("UPDATE users SET photo=? WHERE id=?", (filename, uid))
+        create_media_update_post(conn, uid, path, "updated their profile photo.")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        delete_public_upload(path)
+        app.logger.exception("Profile photo update failed")
+        flash("The profile photo could not be updated. Please try again.", "error")
+        return redirect(url_for("profile_settings"))
+    conn.close()
+    if old and old["photo"] and old["photo"] != "default_profile.png":
+        delete_public_upload(old["photo"])
+    flash("Profile photo updated successfully.", "success")
+    return redirect(url_for("profile_settings"))
+
+
 @app.route("/profile/cover", methods=["POST"])
 def update_cover_photo():
     if not user_required(): return redirect(url_for("user_login"))
