@@ -4563,6 +4563,9 @@ def server_error(error):
 # ---------------------------------------------------------
 # University Connect education + career platform layer
 # ---------------------------------------------------------
+from api_v1 import install as install_api_v1
+install_api_v1(__import__(__name__))
+
 install_v2_core(app, get_db_connection, require_csrf)
 
 # ---------------------------------------------------------
