@@ -2049,6 +2049,7 @@ def serialize_posts(conn, posts, user_id):
             "media_url": (url_for("private_post_media", token=p["media_token"]) if p["original_name"] else None),
             "created_at": p["created_at"], "like_count": p["like_count"],
             "comment_count": p["comment_count"], "liked_by_me": bool(p["liked_by_me"]),
+            "saved_by_me": bool(conn.execute("SELECT 1 FROM saved_posts WHERE user_id=? AND post_id=?",(user_id,p["id"])).fetchone()),
             "saved_by_me": int(p["id"]) in saved_ids,
             "is_owner": int(p["user_id"]) == int(user_id),
             "comments":comment_map.get(int(p["id"]),[])
