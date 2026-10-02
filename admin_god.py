@@ -87,6 +87,14 @@ def install(app, get_db_connection, init_db):
               )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_staff_user ON admin_staff(user_id) WHERE user_id IS NOT NULL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, event_type TEXT NOT NULL,
+            target_type TEXT DEFAULT '', target_id TEXT DEFAULT '', duration_seconds INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT DEFAULT '', created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_user_time ON usage_events(user_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_type_time ON usage_events(event_type, created_at)")
         conn.execute("""CREATE TABLE IF NOT EXISTS mobile_builds (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             request_id TEXT NOT NULL UNIQUE,
@@ -197,6 +205,67 @@ def install(app, get_db_connection, init_db):
         }
         mobile_build=refresh_mobile_build(mobile_build_row())
         return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""),mobile_build=mobile_build,mobile_builder_configured=bool(github_config()[0]))
+
+    def analytics_event(event_type, target_type="", target_id="", duration_seconds=0, metadata=""):
+        if not session.get("user_logged_in") or session.get("user_id") is None:
+            return
+        try: duration = max(0, min(300, int(duration_seconds or 0)))
+        except (TypeError, ValueError): duration = 0
+        conn = get_db_connection()
+        conn.execute("""INSERT INTO usage_events(user_id,event_type,target_type,target_id,duration_seconds,metadata,created_at)
+                       VALUES(?,?,?,?,?,?,?)""", (int(session["user_id"]), str(event_type)[:80], str(target_type)[:80],
+                       str(target_id)[:120], duration, str(metadata)[:1000], datetime.utcnow().isoformat()))
+        conn.commit(); conn.close()
+
+    @app.route("/api/analytics/event", methods=["POST"])
+    def analytics_event_api():
+        if not session.get("user_logged_in") or session.get("user_id") is None:
+            return jsonify({"error": "login_required"}), 401
+        data = request.get_json(silent=True) or {}
+        event_type = str(data.get("event_type", "")).strip().lower()
+        allowed = {"page_view", "site_heartbeat", "reel_view", "reel_watch", "story_view", "story_watch"}
+        if event_type not in allowed: return jsonify({"error": "invalid_event"}), 400
+        metadata = data.get("metadata", {})
+        analytics_event(event_type, data.get("target_type",""), data.get("target_id",""), data.get("duration_seconds",0),
+                        json.dumps(metadata, separators=(",", ":")) if isinstance(metadata, dict) else "")
+        return jsonify({"ok": True})
+
+    @app.route("/admin/god/analytics", methods=["GET"])
+    @owner_required
+    def admin_god_analytics():
+        ensure_schema()
+        raw_period = request.args.get("period", "30").strip().lower()
+        days = 0 if raw_period in {"all","0"} else max(1, min(3650, int(raw_period or 30)))
+        cutoff = None if days == 0 else (datetime.utcnow() - __import__("datetime").timedelta(days=days)).isoformat()
+        conn = get_db_connection()
+        def qcount(sql, params=()):
+            row = conn.execute(sql, params).fetchone(); return int((row["c"] if row else 0) or 0)
+        ewhere = " WHERE created_at >= ?" if cutoff else ""
+        eparams = (cutoff,) if cutoff else ()
+        stats = {
+            "active_users": qcount("SELECT COUNT(DISTINCT user_id) AS c FROM usage_events"+ewhere+" AND user_id IS NOT NULL", eparams),
+            "site_visits": qcount("SELECT COUNT(*) AS c FROM usage_events"+ewhere+" AND event_type='page_view'", eparams),
+            "active_seconds": qcount("SELECT COALESCE(SUM(duration_seconds),0) AS c FROM usage_events"+ewhere+" AND event_type IN ('site_heartbeat','reel_watch','story_watch')", eparams),
+            "reel_views": qcount("SELECT COUNT(*) AS c FROM usage_events"+ewhere+" AND event_type='reel_view'", eparams),
+            "reel_watch_seconds": qcount("SELECT COALESCE(SUM(duration_seconds),0) AS c FROM usage_events"+ewhere+" AND event_type='reel_watch'", eparams),
+            "story_views": qcount("SELECT COUNT(*) AS c FROM usage_events"+ewhere+" AND event_type='story_view'", eparams),
+            "story_watch_seconds": qcount("SELECT COALESCE(SUM(duration_seconds),0) AS c FROM usage_events"+ewhere+" AND event_type='story_watch'", eparams),
+        }
+        stats["story_uploads"] = qcount("SELECT COUNT(*) AS c FROM stories"+(" WHERE created_at >= ?" if cutoff else ""), eparams)
+        stats["posts"] = qcount("SELECT COUNT(*) AS c FROM posts"+(" WHERE created_at >= ?" if cutoff else ""), eparams)
+        join_clause = " AND e.created_at >= ?" if cutoff else ""
+        story_clause = " AND s.created_at >= ?" if cutoff else ""
+        user_params = ((cutoff,) if cutoff else ()) + ((cutoff,) if cutoff else ())
+        users = conn.execute("""SELECT u.id,u.username,u.name,
+                    COALESCE(SUM(CASE WHEN e.event_type IN ('site_heartbeat','reel_watch','story_watch') THEN e.duration_seconds ELSE 0 END),0) AS active_seconds,
+                    COALESCE(SUM(CASE WHEN e.event_type='page_view' THEN 1 ELSE 0 END),0) AS visits,
+                    COALESCE(SUM(CASE WHEN e.event_type='reel_view' THEN 1 ELSE 0 END),0) AS reel_views,
+                    COALESCE(SUM(CASE WHEN e.event_type='story_view' THEN 1 ELSE 0 END),0) AS story_views,
+                    (SELECT COUNT(*) FROM stories s WHERE s.user_id=u.id""" + story_clause + """) AS story_uploads
+                    FROM users u LEFT JOIN usage_events e ON e.user_id=u.id""" + join_clause + """
+                    GROUP BY u.id,u.username,u.name ORDER BY active_seconds DESC,visits DESC,u.id DESC LIMIT 500""", user_params).fetchall()
+        conn.close()
+        return render_template("admin_analytics.html", stats=stats, users=users, period=raw_period if raw_period in {"7","30","90","365","all"} else str(days), csrf=session.get("csrf_token",""))
 
     def github_config():
         token = os.environ.get("GITHUB_ACTIONS_TOKEN", "").strip()
