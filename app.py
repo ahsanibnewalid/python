@@ -3071,12 +3071,16 @@ def send_message():
     ciphertext=request.form.get("ciphertext","").strip()
     iv=request.form.get("iv","").strip()
     message_text=request.form.get("message","").strip()
+    reply_to_id=request.form.get("reply_to_id",type=int)
     if not receiver_id or receiver_id==sender_id:
         return jsonify({"error":"Invalid recipient."}),400
     conn=get_db_connection()
     recipient=conn.execute("SELECT id FROM users WHERE id=?",(receiver_id,)).fetchone()
     if not recipient: conn.close(); return jsonify({"error":"Recipient not found."}),404
     if users_are_blocked(conn,sender_id,receiver_id): conn.close(); return jsonify({"error":"You cannot message this user because one of you has blocked the other."}),403
+    if reply_to_id:
+        if not conn.execute("SELECT id FROM messages WHERE id=? AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?))",(reply_to_id,sender_id,receiver_id,receiver_id,sender_id)).fetchone():
+            reply_to_id=None
     pref=conn.execute("SELECT e2ee_enabled,disappearing_seconds FROM chat_preferences WHERE user_id=? AND peer_id=?",(sender_id,receiver_id)).fetchone()
     secure=bool(pref and pref["e2ee_enabled"])
     if secure:
@@ -3097,8 +3101,8 @@ def send_message():
     if disappear>0:
         from datetime import timedelta
         expires_at=(datetime.now()+timedelta(seconds=disappear)).strftime("%Y-%m-%d %H:%M:%S")
-    cursor=conn.execute("""INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL)""",
-                        (sender_id,receiver_id,stored_message,ciphertext,iv,encryption_version,created_at,expires_at))
+    cursor=conn.execute("""INSERT INTO messages(sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at,reply_to_id,edited_at) VALUES(?,?,?,?,?,?,?,?,0,NULL,NULL,?,NULL)""",
+                        (sender_id,receiver_id,stored_message,ciphertext,iv,encryption_version,created_at,expires_at,reply_to_id))
     message_id=cursor.lastrowid
     # Bridge direct social messages into the platform conversation inbox so
     # Social and Workspace share the same direct-message history.
@@ -3124,8 +3128,21 @@ def send_message():
     conn.commit(); conn.close()
     return jsonify({"ok":True,"message":{"id":message_id,"sender_id":sender_id,"receiver_id":receiver_id,
         "message":stored_message,"ciphertext":ciphertext,"iv":iv,"encryption_version":encryption_version,
-        "created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None}})
+        "created_at":created_at,"expires_at":expires_at,"is_read":0,"delivered_at":None,"reply_to_id":reply_to_id,"edited_at":None}})
 
+
+@app.route("/messages/<int:message_id>/edit", methods=["POST"])
+def edit_message(message_id):
+    if not user_required(): return jsonify({"error":"login_required"}),401
+    require_csrf(); uid=session["user_id"]; text=request.form.get("message","").strip()
+    if not text or len(text)>5000: return jsonify({"error":"Message cannot be empty or exceed 5000 characters."}),400
+    conn=get_db_connection()
+    row=conn.execute("SELECT id,sender_id FROM messages WHERE id=?",(message_id,)).fetchone()
+    if not row: conn.close(); return jsonify({"error":"Message not found."}),404
+    if int(row["sender_id"])!=int(uid): conn.close(); return jsonify({"error":"You can only edit your own message."}),403
+    now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("UPDATE messages SET message=?,edited_at=? WHERE id=?",(text,now,message_id)); conn.commit(); conn.close()
+    return jsonify({"ok":True,"message_id":message_id,"message":text,"edited_at":now})
 
 @app.route("/api/messages/<int:user_id>")
 def api_messages(user_id):
@@ -3141,7 +3158,7 @@ def api_messages(user_id):
     conn.execute("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at<=?",(now,))
     if not blocked:
         conn.execute("UPDATE messages SET delivered_at=COALESCE(delivered_at,?), is_read=1, read_at=COALESCE(read_at,?) WHERE sender_id=? AND receiver_id=?",(now,now,user_id,current_user_id))
-    rows=conn.execute("""SELECT id,sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at FROM messages WHERE id>? AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)) ORDER BY id ASC""",(since_id,current_user_id,user_id,user_id,current_user_id)).fetchall()
+    rows=conn.execute("""SELECT id,sender_id,receiver_id,message,ciphertext,iv,encryption_version,created_at,expires_at,is_read,delivered_at,read_at,reply_to_id,edited_at FROM messages WHERE id>? AND ((sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)) ORDER BY id ASC""",(since_id,current_user_id,user_id,user_id,current_user_id)).fetchall()
     state_rows=conn.execute("SELECT id,is_read,delivered_at,read_at FROM messages WHERE sender_id=? AND receiver_id=? ORDER BY id DESC LIMIT 100",(current_user_id,user_id)).fetchall()
     conn.commit(); conn.close()
     return jsonify({"messages":[dict(r) for r in rows],"sent_state":[dict(r) for r in state_rows],"blocked":blocked})
