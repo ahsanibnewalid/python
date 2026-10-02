@@ -2275,6 +2275,10 @@ def api_stories():
 
 @app.route("/posts/create", methods=["POST"])
 def create_post():
+    # Defensive routing: older/stale frontend code may still submit the Story
+    # composer to /posts/create. Never persist Story uploads as feed posts/Reels.
+    if "story_media" in request.files or request.form.get("story_mode", "").strip().lower() == "story":
+        return create_story()
     wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", "")
     if not user_required():
         return (jsonify({"error": "login_required"}), 401) if wants_json else redirect(url_for("user_login"))
