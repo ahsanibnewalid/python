@@ -1,9 +1,0 @@
-export type User={id:number;name:string;username:string;gmail:string;phone?:string;photo?:string;nickname?:string;relationship_status?:string;university_id?:number|null;bio?:string;headline?:string;occupation?:string;company?:string;website?:string;education?:string;skills?:string;experience?:string;achievements?:string;interests?:string;projects?:string;certifications?:string;profile_view?:string;photo_url?:string|null};
-export type Comment={name:string;comment:string;created_at:string;photo_url?:string|null};
-export type Post={id:number;user_id:number;name:string;username:string;photo_url?:string|null;caption:string;media_type:"image"|"video";post_type:"post"|"reel";media_url?:string|null;created_at:string;like_count:number;comment_count:number;liked_by_me:boolean;is_owner:boolean;comments:Comment[]};
-export type Story={id:number;user_id:number;name:string;username:string;photo_url?:string|null;media_type:"image"|"video";caption:string;media_url:string;created_at:string;is_mine:boolean};
-export type Conversation={other_user_id:number;name:string;username:string;photo_url?:string|null;last_message:string;last_created_at:string;unread_count:number};
-export type Message={id:number;sender_id:number;receiver_id:number;message:string;created_at:string;expires_at?:string|null;is_read:number;delivered_at?:string|null;read_at?:string|null};
-export type Workspace={institutions:Array<Record<string,unknown>>;organizations:Array<Record<string,unknown>>;jobs:Array<Record<string,unknown>>;applications:Array<Record<string,unknown>>;cv:Record<string,unknown>|null;documents:Array<Record<string,unknown>>;conversations:Array<Record<string,unknown>>};
-export type SearchUser={id:number;name:string;username:string;headline?:string;photo_url?:string|null};
-export type SearchSpace={id:number;kind:string;name:string;slug:string;verification_status?:string};
