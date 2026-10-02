@@ -1806,7 +1806,7 @@ def my_dashboard():
     saved_items = []
     for row in saved_rows:
         item = dict(row)
-        item["media_url"] = private_media_url(item["media_token"], item["original_name"], uid) if item["media_token"] else None
+        item["media_url"] = url_for("private_post_media", token=item["media_token"]) if item["media_token"] else None
         saved_items.append(item)
 
     activity_rows = []
@@ -1829,7 +1829,7 @@ def my_dashboard():
     recent_post_items=[]
     for row in recent_posts:
         item=dict(row)
-        item["media_url"]=private_media_url(item["media_token"],item["original_name"],uid) if item["media_token"] else None
+        item["media_url"]=url_for("private_post_media", token=item["media_token"]) if item["media_token"] else None
         recent_post_items.append(item)
 
     workspace_links = [
@@ -1861,6 +1861,7 @@ def saved_posts_page():
         return redirect(url_for("user_login"))
     uid=session["user_id"]
     conn=get_db_connection()
+    current_user=conn.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
     rows=conn.execute(
         """SELECT p.*,u.name AS author_name,u.username AS author_username,u.photo AS author_photo
            FROM saved_posts sp JOIN posts p ON p.id=sp.post_id JOIN users u ON u.id=p.user_id
@@ -1873,7 +1874,7 @@ def saved_posts_page():
         item["media_url"]=private_media_url(item["media_token"],item["original_name"],uid) if item["media_token"] else None
         items.append(item)
     conn.close()
-    return render_template("saved_posts.html", current_user=profile if False else None, items=items, csrf=csrf_token(), site_name=get_site_name())
+    return render_template("saved_posts.html", current_user=current_user, items=items, csrf=csrf_token(), site_name=get_site_name())
 
 
 @app.route("/api/posts/<int:post_id>/save", methods=["POST"])
