@@ -50,9 +50,7 @@ Before switching a currently running SQLite deployment to PostgreSQL, export the
 
 ## End-to-end encrypted chat
 
-The chat UI now uses browser Web Crypto (ECDH P-256 + HKDF + AES-256-GCM) for new messages. The server receives only ciphertext, IV and delivery/read metadata. Public keys are stored in PostgreSQL; private keys remain in the user's browser local storage. If a user clears browser storage or changes devices without a key backup mechanism, old encrypted messages cannot be decrypted on that device. Existing pre-E2EE plaintext messages are retained for backward compatibility.
-
-The current implementation is a practical single-browser E2EE layer, not a full Signal Protocol implementation. For production-grade multi-device cryptography, add device keys, authenticated key verification/safety numbers, key rotation, forward secrecy and a secure recovery mechanism.
+The chat UI uses normal server-side text messaging.
 
 ## Phone registration
 
