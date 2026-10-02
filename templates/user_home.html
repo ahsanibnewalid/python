@@ -190,8 +190,15 @@ document.addEventListener('play',e=>{if(e.target?.tagName==='VIDEO'){document.qu
 async function readNotification(id,el){try{await fetch('/notifications/'+id+'/read',{method:'POST',headers:{'X-CSRF-Token':CSRF}});el.classList.remove('unread');loadNotifications()}catch(e){}}
 async function markAllNotifications(){try{await fetch('/notifications/read-all',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest'}})}catch(e){}loadNotifications(true)}
 
-let storyCollection={{ stories|tojson }};let storyIndex=0;let currentStory=null;let storyTimer=null;
-function openStory(story){currentStory=story;storyIndex=Math.max(0,storyCollection.findIndex(s=>Number(s.id)===Number(story.id)));renderStory()}
+const analyticsPageStarted=Date.now();
+function sendAnalytics(event_type,target_type="",target_id="",duration_seconds=0){fetch('/api/analytics/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event_type,target_type,target_id,duration_seconds})}).catch(()=>{});}
+sendAnalytics('page_view','page','user_home');
+const analyticsHeartbeat=setInterval(()=>sendAnalytics('site_heartbeat','page','user_home',Math.min(30,Math.round((Date.now()-analyticsPageStarted)/1000))),30000);
+window.addEventListener('beforeunload',()=>{clearInterval(analyticsHeartbeat);sendAnalytics('site_heartbeat','page','user_home',Math.min(30,Math.round((Date.now()-analyticsPageStarted)/1000)));});
+let storyCollection={{ stories|tojson }};let storyIndex=0;let currentStory=null;let storyTimer=null;let storyStartedAt=0;let trackedStoryId=null;
+function finishStoryAnalytics(){if(trackedStoryId!==null){sendAnalytics('story_watch','story',trackedStoryId,Math.min(300,Math.round((Date.now()-storyStartedAt)/1000)));trackedStoryId=null;storyStartedAt=0;}}
+
+function openStory(story){finishStoryAnalytics();currentStory=story;trackedStoryId=story.id;storyStartedAt=Date.now();sendAnalytics('story_view','story',story.id);storyIndex=Math.max(0,storyCollection.findIndex(s=>Number(s.id)===Number(story.id)));renderStory()}
 function renderStory(){
 if(!currentStory)return;
 const story=currentStory,viewer=document.getElementById('storyViewer'),oldMedia=document.getElementById('storyViewerMedia');
@@ -254,7 +261,7 @@ if(story.media_type==='video'){
 function navigateStory(delta){if(!storyCollection.length)return;let next=storyIndex+delta;if(next<0)next=storyCollection.length-1;if(next>=storyCollection.length){closeStory();return}storyIndex=next;currentStory=storyCollection[next];renderStory()}
 async function deleteCurrentStory(){if(!currentStory||!currentStory.is_mine)return;const id=currentStory.id;if(!confirm('Delete this story? It will disappear for everyone immediately.'))return;const r=await fetch('/stories/'+id+'/delete',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});const d=await r.json().catch(()=>({}));if(!r.ok){alert(d.error||'Could not delete story.');return}storyCollection=storyCollection.filter(s=>Number(s.id)!==Number(id));const card=document.querySelector('.story-link[href="#story-'+id+'"]');if(card)card.remove();if(storyCollection.length){storyIndex=Math.min(storyIndex,storyCollection.length-1);currentStory=storyCollection[storyIndex];renderStory()}else closeStory()}
 async function deleteStory(id,button){if(!confirm('Delete this story?'))return;button.disabled=true;const r=await fetch('/stories/'+id+'/delete',{method:'POST',headers:{'X-CSRF-Token':CSRF,'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});const d=await r.json().catch(()=>({}));if(!r.ok){alert(d.error||'Could not delete story.');button.disabled=false;return}const card=button.closest('.story-link');card?.remove();storyCollection=storyCollection.filter(s=>Number(s.id)!==Number(id))}
-function closeStory(){clearTimeout(storyTimer);document.getElementById('storyViewer').classList.remove('open');const m=document.getElementById('storyViewerMedia');if(m&&m.tagName==='VIDEO')m.pause()}
+function closeStory(){finishStoryAnalytics();clearTimeout(storyTimer);document.getElementById('storyViewer').classList.remove('open');const m=document.getElementById('storyViewerMedia');if(m&&m.tagName==='VIDEO')m.pause()}
 
 const mobileSearch=document.querySelector('.mobile-search');mobileSearch?.addEventListener('click',()=>{const p=document.querySelector('.mobile-search-panel');p.style.display=p.style.display==='block'?'none':'block'});
 </script>
