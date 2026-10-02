@@ -1,8 +1,15 @@
 import os
 import hmac
+import io
+import json
+import tempfile
+import urllib.error
+import urllib.request
+import urllib.parse
+import zipfile
 from datetime import datetime
 from functools import wraps
-from flask import request, session, redirect, url_for, render_template, flash, abort
+from flask import request, session, redirect, url_for, render_template, flash, abort, jsonify, send_file
 
 SCOPES = {
     "users": "Users & accounts",
@@ -80,6 +87,19 @@ def install(app, get_db_connection, init_db):
               )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_staff_user ON admin_staff(user_id) WHERE user_id IS NOT NULL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS mobile_builds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT NOT NULL UNIQUE,
+            run_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'queued',
+            conclusion TEXT DEFAULT NULL,
+            artifact_id INTEGER DEFAULT NULL,
+            artifact_name TEXT DEFAULT 'university-connect-android-debug',
+            requested_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            error TEXT DEFAULT ''
+        )""")
         conn.commit(); conn.close()
 
     def notify_staff(conn, user_id, title, body):
@@ -175,7 +195,195 @@ def install(app, get_db_connection, init_db):
             "secret_status":"ready" if os.environ.get("FLASK_SECRET_KEY","").strip() else "warning",
             "environment":os.environ.get("APP_ENV","development"),
         }
-        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""))
+        mobile_build=refresh_mobile_build(mobile_build_row())
+        return render_template("admin_god.html",counts=counts,staff=staff_data,scopes=SCOPES,actions=recent,users=users,trust_spaces=trust_spaces,health=health,owner=getattr(app_module,"ADMIN_USER",os.environ.get("ADMIN_USER","admin")),csrf=session.get("csrf_token",""),mobile_build=mobile_build,mobile_builder_configured=bool(github_config()[0]))
+
+    def github_config():
+        token = os.environ.get("GITHUB_ACTIONS_TOKEN", "").strip()
+        repo = os.environ.get("GITHUB_ACTIONS_REPO", "ahsanibnewalid/python").strip()
+        workflow = os.environ.get("GITHUB_APK_WORKFLOW", "build-android-apk.yml").strip()
+        return token, repo, workflow
+
+    def github_json(method, path, payload=None):
+        token, repo, _ = github_config()
+        if not token:
+            raise RuntimeError("GITHUB_ACTIONS_TOKEN is not configured on the server.")
+        req = urllib.request.Request(
+            "https://api.github.com" + path,
+            method=method,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": "Bearer " + token,
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "University-Connect-Admin",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                raw = response.read()
+                return response.status, json.loads(raw.decode("utf-8")) if raw else {}
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError("GitHub API error %s: %s" % (exc.code, detail[:500]))
+
+    def mobile_build_row():
+        conn = get_db_connection()
+        row = conn.execute("SELECT * FROM mobile_builds ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        return row
+
+    def refresh_mobile_build(row):
+        if not row or not row["run_id"] or row["status"] in ("success", "failure", "cancelled"):
+            return row
+        token, repo, workflow = github_config()
+        if not token:
+            return row
+        try:
+            _, run = github_json("GET", "/repos/%s/actions/runs/%s" % (repo, row["run_id"]))
+            status = run.get("status") or "queued"
+            conclusion = run.get("conclusion")
+            if status == "completed":
+                state = "success" if conclusion == "success" else ("cancelled" if conclusion == "cancelled" else "failure")
+            else:
+                state = status
+            artifact_id = row["artifact_id"]
+            artifact_name = row["artifact_name"]
+            if state == "success":
+                _, data = github_json("GET", "/repos/%s/actions/runs/%s/artifacts?name=%s&per_page=10" % (
+                    repo, row["run_id"], urllib.parse.quote(artifact_name, safe="")
+                ))
+                artifacts = data.get("artifacts") or []
+                if artifacts:
+                    artifact_id = artifacts[0].get("id")
+                    artifact_name = artifacts[0].get("name") or artifact_name
+            conn = get_db_connection()
+            conn.execute(
+                "UPDATE mobile_builds SET status=?,conclusion=?,artifact_id=?,artifact_name=?,updated_at=?,error=? WHERE id=?",
+                (state, conclusion, artifact_id, artifact_name, datetime.utcnow().isoformat(), "", row["id"]),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM mobile_builds WHERE id=?", (row["id"],)).fetchone()
+            conn.close()
+        except Exception as exc:
+            conn = get_db_connection()
+            conn.execute("UPDATE mobile_builds SET error=?,updated_at=? WHERE id=?", (str(exc)[:1000], datetime.utcnow().isoformat(), row["id"]))
+            conn.commit()
+            row = conn.execute("SELECT * FROM mobile_builds WHERE id=?", (row["id"],)).fetchone()
+            conn.close()
+        return row
+
+    @app.route("/admin/god/mobile/build", methods=["POST"])
+    @owner_required
+    def admin_god_mobile_build():
+        token, repo, workflow = github_config()
+        if not token:
+            flash("APK builder is not connected. Set GITHUB_ACTIONS_TOKEN in the server environment.", "error")
+            return redirect(url_for("admin_god"))
+        import secrets
+        request_id = secrets.token_hex(10)
+        now = datetime.utcnow().isoformat()
+        conn = get_db_connection()
+        conn.execute(
+            "INSERT INTO mobile_builds(request_id,status,requested_by,created_at,updated_at) VALUES(?,?,?,?,?)",
+            (request_id, "queued", session.get("admin_username") or "system-owner", now, now),
+        )
+        conn.commit()
+        conn.close()
+        try:
+            github_json(
+                "POST",
+                "/repos/%s/actions/workflows/%s/dispatches" % (repo, workflow),
+                {"ref": "main", "inputs": {"request_id": request_id}},
+            )
+            conn = get_db_connection()
+            conn.execute("UPDATE mobile_builds SET status='dispatch_sent',updated_at=? WHERE request_id=?", (datetime.utcnow().isoformat(), request_id))
+            conn.commit()
+            conn.close()
+            flash("Android APK build requested. This page will show the GitHub build status.", "success")
+        except Exception as exc:
+            conn = get_db_connection()
+            conn.execute("UPDATE mobile_builds SET status='failure',error=?,updated_at=? WHERE request_id=?", (str(exc)[:1000], datetime.utcnow().isoformat(), request_id))
+            conn.commit()
+            conn.close()
+            flash("Could not start the Android build: " + str(exc), "error")
+        return redirect(url_for("admin_god"))
+
+    @app.route("/admin/god/mobile/status", methods=["GET"])
+    @owner_required
+    def admin_god_mobile_status():
+        row = mobile_build_row()
+        if row and row["status"] == "dispatch_sent" and not row["run_id"]:
+            token, repo, workflow = github_config()
+            try:
+                _, data = github_json("GET", "/repos/%s/actions/workflows/%s/runs?event=workflow_dispatch&per_page=10" % (repo, workflow))
+                for run in data.get("workflow_runs") or []:
+                    if row["request_id"] in (run.get("name") or ""):
+                        conn = get_db_connection()
+                        conn.execute("UPDATE mobile_builds SET run_id=?,status=?,updated_at=? WHERE id=?", (run.get("id"), run.get("status") or "queued", datetime.utcnow().isoformat(), row["id"]))
+                        conn.commit()
+                        conn.close()
+                        row = mobile_build_row()
+                        break
+            except Exception as exc:
+                if row:
+                    return jsonify({"available": True, "status": row["status"], "error": str(exc)[:500]})
+        row = refresh_mobile_build(row)
+        if not row:
+            return jsonify({"available": False})
+        return jsonify({
+            "available": True,
+            "id": row["id"],
+            "request_id": row["request_id"],
+            "run_id": row["run_id"],
+            "status": row["status"],
+            "conclusion": row["conclusion"],
+            "artifact_id": row["artifact_id"],
+            "artifact_name": row["artifact_name"],
+            "error": row["error"],
+            "run_url": ("https://github.com/%s/actions/runs/%s" % (github_config()[1], row["run_id"])) if row["run_id"] else None,
+            "download_url": url_for("admin_god_mobile_download", build_id=row["id"]) if row["artifact_id"] else None,
+        })
+
+    @app.route("/admin/god/mobile/download/<int:build_id>", methods=["GET"])
+    @owner_required
+    def admin_god_mobile_download(build_id):
+        row = mobile_build_row()
+        if not row or int(row["id"]) != int(build_id):
+            return abort(404)
+        row = refresh_mobile_build(row)
+        if row["status"] != "success" or not row["artifact_id"]:
+            return abort(404, description="A completed APK artifact is not available yet.")
+        token, repo, _ = github_config()
+        if not token:
+            return abort(503, description="APK builder is not configured.")
+        req = urllib.request.Request(
+            "https://api.github.com/repos/%s/actions/artifacts/%s/zip" % (repo, row["artifact_id"]),
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": "Bearer " + token,
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "University-Connect-Admin",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                data = response.read()
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                apk_names = [n for n in archive.namelist() if n.lower().endswith(".apk")]
+                if not apk_names:
+                    return abort(502, description="The build artifact did not contain an APK.")
+                apk = archive.read(apk_names[0])
+        except Exception as exc:
+            app.logger.exception("APK artifact download failed")
+            return abort(502, description="Could not retrieve the APK artifact: %s" % str(exc)[:300])
+        return send_file(
+            io.BytesIO(apk),
+            mimetype="application/vnd.android.package-archive",
+            as_attachment=True,
+            download_name="university-connect-debug-%s.apk" % row["id"],
+        )
 
     @app.route("/admin/god/space/<int:space_id>/verify", methods=["POST"])
     @owner_required
