@@ -1,12 +1,45 @@
-# University Management System
+# University Management System — Python Baseline
 
-A clean Flask and SQLAlchemy foundation for account registration, institutions, role assignments, departments, courses, enrollment, notices, and health checks.
+<p align="center"><strong>A Flask + SQLAlchemy foundation for university account, institution, and academic-management workflows.</strong></p>
 
-## Local setup
-Use Python 3.11+. Run `python -m venv .venv`, activate it, then `pip install -r requirements.txt` and `python app.py`. Open http://127.0.0.1:5000. Set a strong `SECRET_KEY` for deployments.
+<p align="center"><img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white"> <img alt="Flask" src="https://img.shields.io/badge/Flask-Foundation-000000?logo=flask&logoColor=white"> <img alt="PostgreSQL" src="https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white"></p>
 
-## Render
-Create a Blueprint from `render.yaml`. It provisions a web service and PostgreSQL database. Keep all secrets out of Git.
+## Overview
 
-## Important
-This is a minimal baseline, not a full enterprise SIS. Attendance, grades, admissions, password reset, email verification, uploads, and formal schema migrations are not included yet. The app initializes tables but does not migrate the old schema. Back up old data before switching. The clean rebuild removes legacy files from the new branch's current tree; Git history remains available.
+A clean Flask and SQLAlchemy baseline for university-management software.
+
+## Scope
+
+- Account registration
+- Institutions
+- Role assignments
+- Departments
+- Courses
+- Enrollment
+- Notices
+- Health checks
+
+> **Status:** Baseline / foundation project. It is not presented as a complete enterprise student-information system.
+
+## Local Development
+
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    python app.py
+
+Open http://127.0.0.1:5000 and set a strong SECRET_KEY outside local development.
+
+## Deployment
+
+The repository includes Render configuration for a web service and PostgreSQL database. Keep credentials and secrets in environment variables.
+
+## Development Notes
+
+Features such as attendance, grades, admissions, password reset, email verification, uploads, and formal schema migrations require additional implementation depending on the target deployment.
+
+Back up existing data before changing database structures or switching deployments.
+
+## License
+
+See the repository license file for applicable terms.
